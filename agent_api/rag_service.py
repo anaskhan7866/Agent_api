@@ -9,7 +9,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Initialize Embeddings
-embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2")
+embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2", transport="rest")
 
 # Initialize Chroma DB
 CHROMA_PATH = os.path.join(settings.BASE_DIR, 'data', 'chroma_db')
@@ -19,7 +19,7 @@ vector_store = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddin
 retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 
 # Initialize LLM
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+llm = ChatGoogleGenerativeAI(model="gemini-3.8-flash", temperature=0, transport="rest")
 
 # Create QA Prompt
 system_prompt = (
