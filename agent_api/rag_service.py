@@ -9,7 +9,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Initialize Embeddings
-embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", transport="rest")
+embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-2", transport="rest")
 
 # Initialize Chroma DB
 CHROMA_PATH = os.path.join(settings.BASE_DIR, 'data', 'chroma_db')
@@ -85,3 +85,15 @@ def ingest_single_pdf(file_path: str):
                 raise e
                 
     return len(chunks)
+
+def remove_pdf(file_path: str):
+    try:
+        # Chroma's get method returns a dict with 'ids'
+        docs = vector_store.get(where={"source": str(file_path)})
+        if docs and docs.get('ids'):
+            vector_store.delete(ids=docs['ids'])
+            return len(docs['ids'])
+        return 0
+    except Exception as e:
+        raise Exception(f"Failed to remove from vector store: {str(e)}")
+

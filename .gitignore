@@ -47,3 +47,4 @@ venv.bak/
 *.swp
 
 data/chroma_db/
+data/raw_docs/

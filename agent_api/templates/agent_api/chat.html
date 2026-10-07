@@ -567,6 +567,13 @@
                     <button class="primary-btn" onclick="document.getElementById('fileInput').click()">Browse Files</button>
                     <input type="file" id="fileInput" accept=".pdf" style="display: none;">
                 </div>
+                
+                <div style="margin-top: 32px;">
+                    <h3 style="font-size: 1.125rem; margin-bottom: 16px;">Uploaded Documents</h3>
+                    <div id="fileList" style="display: flex; flex-direction: column; gap: 12px;">
+                        <p style="color: var(--text-secondary); font-size: 0.875rem;">Loading documents...</p>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -694,6 +701,7 @@
                 
                 if (response.ok) {
                     showToast(data.message, 'success');
+                    loadFiles(); // Refresh file list
                     setTimeout(() => document.querySelectorAll('.nav-item')[2].click(), 1000);
                 } else {
                     showToast(data.error || 'Upload failed', 'error');
@@ -703,6 +711,64 @@
             }
             fileInput.value = '';
         }
+        
+        async function loadFiles() {
+            const fileList = document.getElementById('fileList');
+            try {
+                const response = await fetch('/upload/');
+                const data = await response.json();
+                if (response.ok) {
+                    if (data.files.length === 0) {
+                        fileList.innerHTML = '<p style="color: var(--text-secondary); font-size: 0.875rem;">No documents uploaded yet.</p>';
+                        return;
+                    }
+                    fileList.innerHTML = data.files.map(file => `
+                        <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-light); padding: 12px 16px; border-radius: var(--radius-md);">
+                            <div style="display: flex; align-items: center; gap: 12px;">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                <span style="font-weight: 500; font-size: 0.9375rem;">${file}</span>
+                            </div>
+                            <button onclick="deleteFile('${file}')" style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 4px; display: flex; align-items: center;">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+                            </button>
+                        </div>
+                    `).join('');
+                } else {
+                    fileList.innerHTML = '<p style="color: #ef4444; font-size: 0.875rem;">Failed to load documents.</p>';
+                }
+            } catch (error) {
+                fileList.innerHTML = '<p style="color: #ef4444; font-size: 0.875rem;">Network error loading documents.</p>';
+            }
+        }
+        
+        async function deleteFile(filename) {
+            if (!confirm(`Are you sure you want to delete ${filename}? This will remove it from the vector store.`)) return;
+            
+            showToast(`Deleting ${filename}...`, 'info');
+            try {
+                const response = await fetch('/upload/', {
+                    method: 'DELETE',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken 
+                    },
+                    body: JSON.stringify({ filename: filename })
+                });
+                
+                const data = await response.json();
+                if (response.ok) {
+                    showToast(data.message, 'success');
+                    loadFiles(); // Refresh file list
+                } else {
+                    showToast(data.error || 'Failed to delete file', 'error');
+                }
+            } catch (error) {
+                showToast('Network error during deletion', 'error');
+            }
+        }
+        
+        // Load files initially
+        loadFiles();
 
         // Chat Logic
         const chatForm = document.getElementById('chatForm');
