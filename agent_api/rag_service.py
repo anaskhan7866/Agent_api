@@ -9,7 +9,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # Initialize Embeddings
-embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2", transport="rest")
+embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004", transport="rest")
 
 # Initialize Chroma DB
 CHROMA_PATH = os.path.join(settings.BASE_DIR, 'data', 'chroma_db')
