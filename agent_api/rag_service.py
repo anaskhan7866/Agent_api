@@ -3,10 +3,13 @@ import time
 from django.conf import settings
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.output_parsers import StrOutputParser
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.tools import tool
+from langchain_classic.tools.retriever import create_retriever_tool
+from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
 
 # Initialize Embeddings
 embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-2", transport="rest")
@@ -21,29 +24,47 @@ retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 # Initialize LLM
 llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0)
 
-# Create QA Prompt
+# Setup Tools
+document_search = create_retriever_tool(
+    retriever,
+    "document_search",
+    "Primary tool for finding qualitative information in financial reports."
+)
+
+@tool
+def financial_calculator(expression: str) -> str:
+    """Accepts and evaluates basic mathematical expressions (like adding revenue or calculating margins)."""
+    try:
+        return str(eval(expression, {"__builtins__": None}, {}))
+    except Exception as e:
+        return f"Error evaluating expression: {e}"
+
+tools = [document_search, financial_calculator]
+
+# Create Agent Prompt
 system_prompt = (
-    "You are an assistant for question-answering tasks. "
-    "Use the following pieces of retrieved context to answer the question. "
+    "You are an assistant for question-answering tasks and financial analysis. "
+    "Use the provided tools to search for information and perform calculations. "
     "If you don't know the answer, say that you don't know. "
-    "Use three sentences maximum and keep the answer concise.\n\n"
-    "{context}"
+    "Keep your answers concise and informative."
 )
 prompt = ChatPromptTemplate.from_messages([
     ("system", system_prompt),
     ("human", "{input}"),
+    MessagesPlaceholder(variable_name="agent_scratchpad"),
 ])
 
-# Create chain
-rag_chain = prompt | llm | StrOutputParser()
+# Initialize Agent
+agent = create_tool_calling_agent(llm, tools, prompt)
+agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
 def query_rag(query_text: str):
     # Fetch documents manually to have them for sources
     docs = retriever.invoke(query_text)
-    context_text = "\n\n".join(doc.page_content for doc in docs)
     
-    # Generate answer
-    answer = rag_chain.invoke({"input": query_text, "context": context_text})
+    # Generate answer using the agent
+    response = agent_executor.invoke({"input": query_text})
+    answer = response["output"]
     
     sources = []
     for doc in docs:
