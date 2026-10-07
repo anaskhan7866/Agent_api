@@ -775,8 +775,10 @@
         const userInput = document.getElementById('userInput');
         const chatHistory = document.getElementById('chatHistory');
         const sendBtn = document.getElementById('sendBtn');
+        let chatHistoryData = [];
         
         function clearChat() {
+            chatHistoryData = [];
             chatHistory.innerHTML = `
                 <div class="message-row ai">
                     <div class="message-bubble">
@@ -888,7 +890,7 @@
                         'Content-Type': 'application/json',
                         'X-CSRFToken': csrfToken
                     },
-                    body: JSON.stringify({ query: text })
+                    body: JSON.stringify({ query: text, history: chatHistoryData })
                 });
 
                 const data = await response.json();
@@ -896,6 +898,8 @@
 
                 if (response.ok) {
                     appendAIMessage(data.answer, data.sources);
+                    chatHistoryData.push({ role: 'user', content: text });
+                    chatHistoryData.push({ role: 'assistant', content: data.answer });
                 } else {
                     showToast(data.error || 'Query failed', 'error');
                 }

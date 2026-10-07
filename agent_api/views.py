@@ -10,11 +10,12 @@ from django.views.generic import TemplateView
 class QueryRAGView(APIView):
     def post(self, request, *args, **kwargs):
         query = request.data.get('query')
+        history = request.data.get('history', [])
         if not query:
             return Response({"error": "Please provide a 'query' in the request body."}, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            result = query_rag(query)
+            result = query_rag(query, history)
             return Response(result, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

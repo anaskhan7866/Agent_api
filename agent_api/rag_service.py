@@ -1,5 +1,6 @@
 import os
 import time
+import datetime
 from django.conf import settings
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -10,6 +11,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.tools import tool
 from langchain_classic.tools.retriever import create_retriever_tool
 from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
+from langchain_core.messages import HumanMessage, AIMessage
 
 # Initialize Embeddings
 embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-2", transport="rest")
@@ -39,7 +41,12 @@ def financial_calculator(expression: str) -> str:
     except Exception as e:
         return f"Error evaluating expression: {e}"
 
-tools = [document_search, financial_calculator]
+@tool
+def current_time(query: str = "") -> str:
+    """Returns the current date and time. Useful when the user asks for things relative to 'now', 'today', 'this year', etc."""
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+tools = [document_search, financial_calculator, current_time]
 
 # Create Agent Prompt
 system_prompt = (
@@ -50,6 +57,7 @@ system_prompt = (
 )
 prompt = ChatPromptTemplate.from_messages([
     ("system", system_prompt),
+    MessagesPlaceholder(variable_name="chat_history", optional=True),
     ("human", "{input}"),
     MessagesPlaceholder(variable_name="agent_scratchpad"),
 ])
@@ -58,12 +66,24 @@ prompt = ChatPromptTemplate.from_messages([
 agent = create_tool_calling_agent(llm, tools, prompt)
 agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
-def query_rag(query_text: str):
+def query_rag(query_text: str, history: list = None):
+    # Process history
+    history = history or []
+    chat_history = []
+    for msg in history:
+        if msg.get('role') == 'user':
+            chat_history.append(HumanMessage(content=msg.get('content', '')))
+        else:
+            chat_history.append(AIMessage(content=msg.get('content', '')))
+            
     # Fetch documents manually to have them for sources
     docs = retriever.invoke(query_text)
     
     # Generate answer using the agent
-    response = agent_executor.invoke({"input": query_text})
+    response = agent_executor.invoke({
+        "input": query_text,
+        "chat_history": chat_history
+    })
     answer = response["output"]
     
     sources = []
