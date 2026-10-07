@@ -19,7 +19,7 @@ vector_store = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddin
 retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 
 # Initialize LLM
-llm = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0)
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
 
 # Create QA Prompt
 system_prompt = (
