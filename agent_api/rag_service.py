@@ -19,7 +19,7 @@ vector_store = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddin
 retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 
 # Initialize LLM
-llm = ChatGoogleGenerativeAI(model="gemini-3.8-flash", temperature=0, transport="rest")
+llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0)
 
 # Create QA Prompt
 system_prompt = (
@@ -62,20 +62,26 @@ def ingest_single_pdf(file_path: str):
     documents = loader.load()
     if not documents:
         return 0
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)
+    # Increase chunk size to create fewer chunks, meaning fewer API calls
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
     chunks = text_splitter.split_documents(documents)
     
-    batch_size = 50
-    for i in range(0, len(chunks), batch_size):
-        batch = chunks[i:i+batch_size]
-        success = False
-        while not success:
-            try:
-                vector_store.add_documents(batch)
-                success = True
-            except Exception as e:
-                if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                    time.sleep(60)
-                else:
+    # Let LangChain handle the batching internally (it optimizes payload size)
+    # Use exponential backoff for rate limits instead of a flat 60 seconds
+    retry_delay = 5
+    max_retries = 5
+    
+    for attempt in range(max_retries):
+        try:
+            vector_store.add_documents(chunks)
+            break
+        except Exception as e:
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                if attempt == max_retries - 1:
                     raise e
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff: 5s, 10s, 20s, 40s
+            else:
+                raise e
+                
     return len(chunks)
