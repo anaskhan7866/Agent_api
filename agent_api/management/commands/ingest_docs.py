@@ -3,7 +3,7 @@ from django.core.management.base import BaseCommand
 from django.conf import settings
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
 
 class Command(BaseCommand):
@@ -53,16 +53,28 @@ class Command(BaseCommand):
 
         # 3. Initialize Embeddings and Save to Chroma
         try:
-            self.stdout.write("Initializing OpenAI embeddings...")
-            embeddings = OpenAIEmbeddings()
+            self.stdout.write("Initializing Google Generative AI embeddings...")
+            embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2")
 
             self.stdout.write(f"Saving chunked documents to Chroma DB at {chroma_db_dir}...")
             
-            vector_db = Chroma.from_documents(
-                documents=chunks,
-                embedding=embeddings,
-                persist_directory=chroma_db_dir
-            )
+            import time
+            vector_db = Chroma(persist_directory=chroma_db_dir, embedding_function=embeddings)
+            batch_size = 50
+            for i in range(0, len(chunks), batch_size):
+                batch = chunks[i:i+batch_size]
+                success = False
+                while not success:
+                    try:
+                        vector_db.add_documents(batch)
+                        success = True
+                        self.stdout.write(f"Embedded batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}")
+                    except Exception as e:
+                        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                            self.stdout.write(f"Rate limit hit! Sleeping 60 seconds before retrying batch {i//batch_size + 1}...")
+                            time.sleep(60)
+                        else:
+                            raise e
 
             self.stdout.write(self.style.SUCCESS(f"Success! Embedded and saved {len(chunks)} chunks to the vector database."))
         except Exception as e:
