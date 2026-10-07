@@ -3,472 +3,682 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Document Platform</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <title>Nexus | Intelligent Knowledge Retrieval</title>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Marked.js for Markdown parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
     <style>
         :root {
-            --bg-color: #0f172a;
-            --chat-bg: #1e293b;
-            --user-msg: #3b82f6;
-            --ai-msg: #334155;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --accent: #60a5fa;
-            --glass-bg: rgba(30, 41, 59, 0.7);
-            --glass-border: rgba(255, 255, 255, 0.1);
+            --bg-body: #f8fafc;
+            --bg-surface: #ffffff;
+            --bg-surface-hover: #f1f5f9;
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --text-tertiary: #94a3b8;
+            --border-light: #e2e8f0;
+            --accent-primary: #000000;
+            --accent-hover: #333333;
+            --user-bubble: #f1f5f9;
+            --ai-bubble: #ffffff;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-xl: 16px;
+            --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
 
         body {
-            font-family: 'Inter', sans-serif;
-            background: linear-gradient(135deg, #020617 0%, #0f172a 100%);
-            color: var(--text-main);
-            margin: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-body);
+            color: var(--text-primary);
+            line-height: 1.5;
             height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            -webkit-font-smoothing: antialiased;
         }
 
-        /* Navbar */
-        nav {
-            background: rgba(15, 23, 42, 0.8);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid var(--glass-border);
-            padding: 16px 40px;
+        /* Top Navigation */
+        .navbar {
+            background-color: var(--bg-surface);
+            border-bottom: 1px solid var(--border-light);
+            padding: 0 32px;
+            height: 64px;
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            z-index: 100;
+            justify-content: space-between;
+            flex-shrink: 0;
         }
 
         .brand {
-            font-size: 1.5rem;
             font-weight: 700;
-            background: linear-gradient(to right, #60a5fa, #a78bfa);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
+            font-size: 1.125rem;
+            letter-spacing: -0.025em;
             display: flex;
             align-items: center;
-            gap: 12px;
+            gap: 8px;
+        }
+
+        .brand-logo {
+            width: 24px;
+            height: 24px;
+            background-color: var(--accent-primary);
+            color: white;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .nav-links {
             display: flex;
-            gap: 24px;
+            gap: 8px;
         }
 
-        .nav-link {
-            color: var(--text-muted);
-            cursor: pointer;
-            font-weight: 500;
+        .nav-item {
             padding: 8px 16px;
-            border-radius: 8px;
-            transition: all 0.3s ease;
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s ease;
         }
 
-        .nav-link:hover {
-            color: var(--text-main);
-            background: rgba(255,255,255,0.05);
+        .nav-item:hover {
+            color: var(--text-primary);
+            background-color: var(--bg-surface-hover);
         }
 
-        .nav-link.active {
-            color: #fff;
-            background: rgba(59, 130, 246, 0.2);
-            box-shadow: inset 0 0 0 1px var(--user-msg);
+        .nav-item.active {
+            color: var(--text-primary);
+            background-color: var(--bg-body);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-light);
         }
 
-        /* Container */
-        .main-content {
-            flex-grow: 1;
+        /* Main Container */
+        .main-container {
+            flex: 1;
+            overflow: hidden;
             position: relative;
-            overflow-y: auto;
-            overflow-x: hidden;
         }
 
-        .section {
+        .view-section {
             display: none;
-            padding: 40px;
-            max-width: 1200px;
-            margin: 0 auto;
-            animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            height: 100%;
+            overflow-y: auto;
+            padding: 48px 24px;
+            animation: fade-in 0.3s ease-out;
         }
 
-        .section.active {
+        .view-section.active {
             display: block;
         }
 
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(15px); }
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
 
-        /* Home Section */
-        .hero {
-            text-align: center;
-            padding: 60px 0;
-        }
-        .hero h1 {
-            font-size: 3.5rem;
-            margin-bottom: 20px;
-            line-height: 1.2;
-        }
-        .hero p {
-            font-size: 1.2rem;
-            color: var(--text-muted);
-            max-width: 600px;
-            margin: 0 auto 40px;
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 24px;
-            margin-top: 40px;
-        }
-        .card {
-            background: var(--glass-bg);
-            border: 1px solid var(--glass-border);
-            border-radius: 20px;
-            padding: 30px;
-            text-align: left;
-            transition: transform 0.3s ease;
-        }
-        .card:hover {
-            transform: translateY(-5px);
-            border-color: var(--accent);
-        }
-        .card h3 {
-            color: var(--accent);
-            margin-top: 0;
-            font-size: 1.25rem;
-        }
-        .card p {
-            color: var(--text-muted);
-            line-height: 1.6;
-            margin-bottom: 0;
+        /* Home View */
+        .home-layout {
+            max-width: 800px;
+            margin: 0 auto;
         }
 
-        /* Upload Section */
-        .upload-container {
+        .hero-header {
+            font-size: 2.5rem;
+            font-weight: 700;
+            letter-spacing: -0.05em;
+            margin-bottom: 16px;
+            line-height: 1.1;
+        }
+
+        .hero-subtitle {
+            font-size: 1.125rem;
+            color: var(--text-secondary);
+            margin-bottom: 40px;
             max-width: 600px;
-            margin: 60px auto;
-            background: var(--glass-bg);
-            border: 2px dashed rgba(96, 165, 250, 0.4);
-            border-radius: 24px;
-            padding: 60px 40px;
-            text-align: center;
-            transition: all 0.3s ease;
-            position: relative;
         }
-        .upload-container:hover, .upload-container.dragover {
-            border-color: var(--accent);
-            background: rgba(30, 41, 59, 0.9);
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 24px;
         }
-        .upload-icon {
-            color: var(--accent);
-            margin-bottom: 20px;
+
+        .feature-card {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            box-shadow: var(--shadow-sm);
         }
-        .upload-title {
-            font-size: 1.5rem;
+
+        .feature-card h3 {
+            font-size: 1rem;
+            margin-bottom: 8px;
             font-weight: 600;
-            margin-bottom: 12px;
         }
-        .upload-desc {
-            color: var(--text-muted);
-            margin-bottom: 30px;
+
+        .feature-card p {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
         }
-        .upload-btn {
-            background: linear-gradient(135deg, #60a5fa, #3b82f6);
+
+        .primary-btn {
+            background-color: var(--accent-primary);
             color: white;
             border: none;
-            border-radius: 12px;
-            padding: 12px 32px;
-            font-weight: 600;
-            font-size: 1rem;
-            cursor: pointer;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .upload-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5);
-        }
-        #uploadProgress {
-            margin-top: 24px;
+            padding: 10px 20px;
+            border-radius: var(--radius-md);
+            font-size: 0.875rem;
             font-weight: 500;
-            display: none;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
         }
 
-        /* Chat Section */
-        .chat-wrapper {
-            max-width: 900px;
+        .primary-btn:hover {
+            background-color: var(--accent-hover);
+        }
+
+        /* Upload View */
+        .upload-layout {
+            max-width: 600px;
             margin: 0 auto;
-            height: calc(100vh - 160px);
-            background: var(--glass-bg);
-            backdrop-filter: blur(16px);
-            border: 1px solid var(--glass-border);
-            border-radius: 24px;
+        }
+
+        .drop-zone {
+            border: 2px dashed var(--border-light);
+            border-radius: var(--radius-xl);
+            padding: 64px 32px;
+            text-align: center;
+            background-color: var(--bg-surface);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .drop-zone:hover, .drop-zone.dragover {
+            border-color: var(--accent-primary);
+            background-color: #fafafa;
+        }
+
+        .drop-zone svg {
+            color: var(--text-tertiary);
+            margin-bottom: 16px;
+        }
+
+        .drop-zone h2 {
+            font-size: 1.25rem;
+            margin-bottom: 8px;
+        }
+
+        .drop-zone p {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            margin-bottom: 24px;
+        }
+
+        /* Chat View */
+        .chat-layout {
+            max-width: 800px;
+            margin: 0 auto;
+            height: 100%;
             display: flex;
             flex-direction: column;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            padding: 0 16px 24px 16px;
         }
 
-        .chat-history {
-            flex-grow: 1;
-            padding: 24px;
+        .chat-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border-light);
+            margin-bottom: 24px;
+        }
+        
+        .clear-btn {
+            background: none;
+            border: 1px solid var(--border-light);
+            padding: 6px 12px;
+            border-radius: var(--radius-md);
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+        
+        .clear-btn:hover {
+            background: var(--bg-surface);
+            color: var(--text-primary);
+        }
+
+        .message-list {
+            flex: 1;
             overflow-y: auto;
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 24px;
+            padding-right: 8px;
+            padding-bottom: 24px;
         }
-        .chat-history::-webkit-scrollbar { width: 8px; }
-        .chat-history::-webkit-scrollbar-track { background: transparent; }
-        .chat-history::-webkit-scrollbar-thumb { background: var(--ai-msg); border-radius: 4px; }
 
-        .message {
-            max-width: 80%;
-            padding: 16px 20px;
-            border-radius: 20px;
-            font-size: 1rem;
-            line-height: 1.6;
-            animation: fadeIn 0.4s forwards;
+        .message-list::-webkit-scrollbar {
+            width: 6px;
         }
-        .user-message {
-            background: linear-gradient(135deg, #2563eb, #3b82f6);
-            align-self: flex-end;
+        .message-list::-webkit-scrollbar-thumb {
+            background: var(--border-light);
+            border-radius: 3px;
+        }
+
+        .message-row {
+            display: flex;
+            width: 100%;
+        }
+
+        .message-row.user {
+            justify-content: flex-end;
+        }
+
+        .message-bubble {
+            max-width: 85%;
+            padding: 16px 20px;
+            border-radius: var(--radius-lg);
+            font-size: 0.9375rem;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .message-row.user .message-bubble {
+            background-color: var(--user-bubble);
+            border: 1px solid var(--border-light);
             border-bottom-right-radius: 4px;
         }
-        .ai-message {
-            background: var(--ai-msg);
-            align-self: flex-start;
+
+        .message-row.ai .message-bubble {
+            background-color: var(--ai-bubble);
+            border: 1px solid var(--border-light);
             border-bottom-left-radius: 4px;
-            border: 1px solid var(--glass-border);
-        }
-        .sources {
-            margin-top: 14px;
-            font-size: 0.85rem;
-            color: var(--text-muted);
-            border-top: 1px solid rgba(255,255,255,0.08);
-            padding-top: 14px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .source-item {
-            background: rgba(0,0,0,0.25);
-            padding: 10px 14px;
-            border-radius: 10px;
-            border: 1px solid transparent;
-        }
-        .source-title {
-            font-weight: 600;
-            color: var(--accent);
-            margin-bottom: 6px;
         }
 
-        .input-area {
-            padding: 24px;
-            background: rgba(15, 23, 42, 0.8);
-            border-top: 1px solid var(--glass-border);
-            border-bottom-left-radius: 24px;
-            border-bottom-right-radius: 24px;
+        .message-bubble p {
+            margin-bottom: 0.75em;
         }
-        .input-form {
+        .message-bubble p:last-child {
+            margin-bottom: 0;
+        }
+        .message-bubble pre {
+            background: #1e293b;
+            color: #f8fafc;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin-bottom: 0.75em;
+            font-size: 0.85rem;
+        }
+        .message-bubble code {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.85em;
+            background: rgba(0,0,0,0.05);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+        .message-bubble pre code {
+            background: none;
+            padding: 0;
+        }
+
+        /* Sources Accordion */
+        .sources-accordion {
+            margin-top: 16px;
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            background: #fafafa;
+        }
+        .sources-header {
+            padding: 10px 16px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-secondary);
             display: flex;
-            gap: 12px;
-            background: rgba(0, 0, 0, 0.3);
-            padding: 10px;
-            border-radius: 20px;
-            border: 1px solid var(--glass-border);
-        }
-        .input-form:focus-within {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15);
-        }
-        input[type="text"] {
-            flex-grow: 1;
-            background: transparent;
-            border: none;
-            color: var(--text-main);
-            font-size: 1.05rem;
-            padding: 12px 16px;
-            outline: none;
-        }
-        .send-btn {
-            background: linear-gradient(135deg, #60a5fa, #3b82f6);
-            color: white;
-            border: none;
-            border-radius: 16px;
-            padding: 0 24px;
+            justify-content: space-between;
+            align-items: center;
             cursor: pointer;
-            transition: all 0.2s;
+            user-select: none;
+            background: #fff;
+        }
+        .sources-header:hover {
+            background: #f8fafc;
+        }
+        .sources-body {
+            display: none;
+            padding: 16px;
+            border-top: 1px solid var(--border-light);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .sources-body.open {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .source-item {
+            background: #fff;
+            border: 1px solid var(--border-light);
+            padding: 12px;
+            border-radius: 6px;
+        }
+        .source-meta {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 4px;
             display: flex;
             align-items: center;
+            gap: 6px;
         }
-        .send-btn:hover {
-            transform: translateY(-2px);
-        }
-        
-        /* Typing Indicator */
-        .typing-indicator {
+
+        /* Input Area */
+        .input-container {
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-lg);
+            padding: 8px;
             display: flex;
-            gap: 8px;
-            padding: 16px 24px;
-            background: var(--ai-msg);
-            border-radius: 20px;
-            align-self: flex-start;
-            border-bottom-left-radius: 4px;
+            align-items: center;
+            box-shadow: var(--shadow-md);
+            margin-top: 16px;
         }
-        .dot {
-            width: 8px; height: 8px;
-            background: var(--accent);
+
+        .input-container input {
+            flex: 1;
+            border: none;
+            padding: 12px 16px;
+            font-size: 0.9375rem;
+            font-family: inherit;
+            outline: none;
+            background: transparent;
+        }
+
+        .input-container input::placeholder {
+            color: var(--text-tertiary);
+        }
+
+        .send-button {
+            background-color: var(--accent-primary);
+            color: white;
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .send-button:disabled {
+            background-color: var(--border-light);
+            cursor: not-allowed;
+        }
+
+        .send-button:hover:not(:disabled) {
+            background-color: var(--accent-hover);
+        }
+
+        /* Typing Indicator */
+        .typing {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 0;
+        }
+        .typing span {
+            width: 6px;
+            height: 6px;
+            background-color: var(--text-tertiary);
             border-radius: 50%;
-            animation: bounce 1.4s infinite;
+            animation: bounce 1.4s infinite ease-in-out both;
         }
-        .dot:nth-child(1) { animation-delay: -0.32s; }
-        .dot:nth-child(2) { animation-delay: -0.16s; }
+        .typing span:nth-child(1) { animation-delay: -0.32s; }
+        .typing span:nth-child(2) { animation-delay: -0.16s; }
         @keyframes bounce {
-            0%, 80%, 100% { transform: scale(0); opacity: 0.3; }
-            40% { transform: scale(1); opacity: 1; }
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        /* Toast Notifications */
+        #toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 1000;
+        }
+        .toast {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-light);
+            padding: 16px 20px;
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            font-size: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: slideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            max-width: 350px;
+        }
+        .toast.success { border-left: 4px solid #10b981; }
+        .toast.error { border-left: 4px solid #ef4444; }
+        .toast.info { border-left: 4px solid #3b82f6; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
         }
     </style>
 </head>
 <body>
     {% csrf_token %}
-    <nav>
+    <nav class="navbar">
         <div class="brand">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-            </svg>
-            OmniRAG
+            <div class="brand-logo">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>
+            </div>
+            Nexus
         </div>
         <div class="nav-links">
-            <div class="nav-link active" onclick="switchTab('home', this)">Home</div>
-            <div class="nav-link" onclick="switchTab('upload', this)">Upload PDF</div>
-            <div class="nav-link" onclick="switchTab('chat', this)">Ask Agent</div>
+            <div class="nav-item active" data-target="view-home">Overview</div>
+            <div class="nav-item" data-target="view-upload">Data Sources</div>
+            <div class="nav-item" data-target="view-chat">Query Agent</div>
         </div>
     </nav>
 
-    <div class="main-content">
-        <!-- Home Section -->
-        <div id="home" class="section active">
-            <div class="hero">
-                <h1>Supercharge your documents<br>with Generative AI.</h1>
-                <p>Upload any PDF and instantly extract insights, answer complex questions, and cite exact page sources using Gemini 3.5 and Chroma Vector Database.</p>
-                <button class="upload-btn" onclick="document.querySelectorAll('.nav-link')[1].click()" style="margin-right: 12px;">Start Uploading</button>
-                <button class="upload-btn" onclick="document.querySelectorAll('.nav-link')[2].click()" style="background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2);">Try Chat</button>
-            </div>
-            
-            <div class="grid">
-                <div class="card">
-                    <h3>Semantic Vector Search</h3>
-                    <p>Uses state-of-the-art embedding models to break down your documents into mathematical vectors, allowing the agent to understand context and meaning rather than just keyword matching.</p>
+    <div class="main-container">
+        <!-- Overview Section -->
+        <div id="view-home" class="view-section active">
+            <div class="home-layout">
+                <h1 class="hero-header">Enterprise Knowledge<br>Retrieval System</h1>
+                <p class="hero-subtitle">Securely index, search, and synthesize answers from your proprietary documents using advanced vector embeddings and generative AI.</p>
+                
+                <div style="margin-bottom: 48px; display: flex; gap: 12px;">
+                    <button class="primary-btn" onclick="document.querySelectorAll('.nav-item')[1].click()">
+                        Connect Data Source
+                    </button>
+                    <button class="primary-btn" style="background: white; color: var(--text-primary); border: 1px solid var(--border-light);" onclick="document.querySelectorAll('.nav-item')[2].click()">
+                        Open Query Interface
+                    </button>
                 </div>
-                <div class="card">
-                    <h3>Powered by Gemini</h3>
-                    <p>Leverages Google's blazing-fast Gemini 3.5 Flash model for reasoning. The agent synthesizes retrieved facts into concise, highly accurate answers.</p>
-                </div>
-                <div class="card">
-                    <h3>Transparent Citations</h3>
-                    <p>Never guess where the AI got its answer. Every response includes direct citations to the source file name and page number, complete with the raw text excerpt.</p>
+
+                <div class="features-grid">
+                    <div class="feature-card">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom:12px; color:var(--text-secondary)"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                        <h3>Semantic Search</h3>
+                        <p>Moves beyond keyword matching. Understands the contextual intent of your queries using highly-dimensional vector embeddings.</p>
+                    </div>
+                    <div class="feature-card">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom:12px; color:var(--text-secondary)"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                        <h3>Automated Synthesis</h3>
+                        <p>Processes raw text chunks through large language models to generate coherent, factual, and concise answers instantly.</p>
+                    </div>
+                    <div class="feature-card">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom:12px; color:var(--text-secondary)"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                        <h3>Verifiable Citations</h3>
+                        <p>Maintains a strict chain of custody. Every generated response includes metadata links back to the original source document.</p>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- Upload Section -->
-        <div id="upload" class="section">
-            <div class="upload-container" id="dropZone">
-                <div class="upload-icon">
-                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <!-- Data Sources Section -->
+        <div id="view-upload" class="view-section">
+            <div class="upload-layout">
+                <div style="margin-bottom: 24px;">
+                    <h2 style="font-size: 1.5rem; margin-bottom: 8px;">Connect Data Source</h2>
+                    <p style="color: var(--text-secondary); font-size: 0.9375rem;">Upload PDF documents to index them into the Chroma vector database.</p>
+                </div>
+
+                <div class="drop-zone" id="dropZone">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                         <polyline points="17 8 12 3 7 8"></polyline>
                         <line x1="12" y1="3" x2="12" y2="15"></line>
                     </svg>
+                    <h2>Select or drop file</h2>
+                    <p>PDF documents only (max 50MB)</p>
+                    <button class="primary-btn" onclick="document.getElementById('fileInput').click()">Browse Files</button>
+                    <input type="file" id="fileInput" accept=".pdf" style="display: none;">
                 </div>
-                <div class="upload-title">Drag & Drop your PDF here</div>
-                <div class="upload-desc">or click the button below to browse files</div>
-                
-                <input type="file" id="fileInput" accept=".pdf" style="display: none;">
-                <button class="upload-btn" onclick="document.getElementById('fileInput').click()">Select PDF File</button>
-                
-                <div id="uploadProgress"></div>
             </div>
         </div>
 
         <!-- Chat Section -->
-        <div id="chat" class="section">
-            <div class="chat-wrapper">
-                <div class="chat-history" id="chatHistory">
-                    <div class="message ai-message">
-                        Hello! I am your AI assistant. I have read the documents in the Chroma database. What would you like to ask?
+        <div id="view-chat" class="view-section" style="padding: 24px;">
+            <div class="chat-layout">
+                <div class="chat-header">
+                    <div>
+                        <h2 style="font-size: 1.125rem;">Query Agent</h2>
+                        <span style="font-size: 0.75rem; color: var(--text-secondary); display: flex; align-items: center; gap: 4px;">
+                            <span style="width: 6px; height: 6px; background-color: #10b981; border-radius: 50%; display: inline-block;"></span>
+                            System Ready
+                        </span>
+                    </div>
+                    <button class="clear-btn" onclick="clearChat()">Clear Context</button>
+                </div>
+
+                <div class="message-list" id="chatHistory">
+                    <!-- Initial System Message -->
+                    <div class="message-row ai">
+                        <div class="message-bubble">
+                            <p>Nexus query interface initialized. The embedding space is fully indexed. How can I assist you with your data today?</p>
+                        </div>
                     </div>
                 </div>
 
-                <div class="input-area">
-                    <form class="input-form" id="chatForm">
-                        <input type="text" id="userInput" placeholder="Ask a question about the uploaded documents..." autocomplete="off" required>
-                        <button type="submit" class="send-btn">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                                <line x1="22" y1="2" x2="11" y2="13"></line>
-                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                            </svg>
-                        </button>
-                    </form>
-                </div>
+                <form class="input-container" id="chatForm">
+                    <input type="text" id="userInput" placeholder="Query the knowledge base..." autocomplete="off" required>
+                    <button type="submit" class="send-button" id="sendBtn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </form>
             </div>
         </div>
     </div>
 
+    <div id="toast-container"></div>
+
     <script>
         const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        
+        // Configure marked.js for safe markdown rendering
+        marked.setOptions({
+            breaks: true,
+            gfm: true
+        });
 
-        // Navigation Logic
-        function switchTab(tabId, element) {
-            document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-            document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+        // Toast Notification System
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
             
-            document.getElementById(tabId).classList.add('active');
-            if(element) element.classList.add('active');
+            let icon = '';
+            if(type === 'success') icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+            else if(type === 'error') icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>';
+            else icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
+            
+            toast.innerHTML = `${icon} <div>${message}</div>`;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
         }
+
+        // Navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
+                document.querySelectorAll('.view-section').forEach(sec => sec.classList.remove('active'));
+                
+                e.target.classList.add('active');
+                document.getElementById(e.target.dataset.target).classList.add('active');
+            });
+        });
 
         // Upload Logic
         const dropZone = document.getElementById('dropZone');
         const fileInput = document.getElementById('fileInput');
-        const uploadProgress = document.getElementById('uploadProgress');
 
         ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, preventDefaults, false);
+            dropZone.addEventListener(eventName, e => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
         });
 
-        function preventDefaults(e) {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-
         ['dragenter', 'dragover'].forEach(eventName => {
-            dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'));
         });
 
         ['dragleave', 'drop'].forEach(eventName => {
-            dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'));
         });
 
-        dropZone.addEventListener('drop', (e) => {
-            const dt = e.dataTransfer;
-            const file = dt.files[0];
-            handleFile(file);
-        });
-
-        fileInput.addEventListener('change', (e) => {
-            handleFile(e.target.files[0]);
-        });
+        dropZone.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
+        fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
 
         async function handleFile(file) {
             if (!file) return;
             if (!file.name.toLowerCase().endsWith('.pdf')) {
-                showProgress('Please upload a valid PDF file.', '#ef4444');
+                showToast('Invalid file format. Please upload a PDF.', 'error');
                 return;
             }
 
-            showProgress(`Uploading and processing: ${file.name}... (This may take a moment to generate vectors)`, 'var(--accent)');
+            showToast(`Indexing ${file.name}...`, 'info');
             
             const formData = new FormData();
             formData.append('file', file);
@@ -483,48 +693,115 @@
                 const data = await response.json();
                 
                 if (response.ok) {
-                    showProgress(`✅ Success: ${data.message}`, '#4ade80');
-                    setTimeout(() => document.querySelectorAll('.nav-link')[2].click(), 2000); // go to chat
+                    showToast(data.message, 'success');
+                    setTimeout(() => document.querySelectorAll('.nav-item')[2].click(), 1000);
                 } else {
-                    showProgress(`❌ Error: ${data.error || 'Upload failed.'}`, '#ef4444');
+                    showToast(data.error || 'Upload failed', 'error');
                 }
             } catch (error) {
-                showProgress(`❌ Network Error: ${error.message}`, '#ef4444');
+                showToast('Network error during upload', 'error');
             }
             fileInput.value = '';
-        }
-
-        function showProgress(msg, color) {
-            uploadProgress.style.display = 'block';
-            uploadProgress.style.color = color;
-            uploadProgress.innerText = msg;
         }
 
         // Chat Logic
         const chatForm = document.getElementById('chatForm');
         const userInput = document.getElementById('userInput');
         const chatHistory = document.getElementById('chatHistory');
+        const sendBtn = document.getElementById('sendBtn');
+        
+        function clearChat() {
+            chatHistory.innerHTML = `
+                <div class="message-row ai">
+                    <div class="message-bubble">
+                        <p>Nexus query interface initialized. The embedding space is fully indexed. How can I assist you with your data today?</p>
+                    </div>
+                </div>
+            `;
+            showToast('Conversation cleared', 'info');
+        }
 
-        function appendMessage(content, isUser = false) {
-            const msgDiv = document.createElement('div');
-            msgDiv.className = `message ${isUser ? 'user-message' : 'ai-message'}`;
-            msgDiv.innerHTML = content;
-            chatHistory.appendChild(msgDiv);
+        function appendUserMessage(text) {
+            const row = document.createElement('div');
+            row.className = 'message-row user';
+            row.innerHTML = `<div class="message-bubble"><p>${text}</p></div>`;
+            chatHistory.appendChild(row);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+        
+        function toggleSources(headerEl) {
+            const body = headerEl.nextElementSibling;
+            const icon = headerEl.querySelector('.chevron');
+            if(body.classList.contains('open')) {
+                body.classList.remove('open');
+                icon.style.transform = 'rotate(0deg)';
+            } else {
+                body.classList.add('open');
+                icon.style.transform = 'rotate(180deg)';
+            }
+        }
+
+        function appendAIMessage(answer, sources) {
+            const row = document.createElement('div');
+            row.className = 'message-row ai';
+            
+            // Parse Markdown for the answer
+            const parsedAnswer = marked.parse(answer);
+            
+            let bubbleHtml = `<div class="message-bubble"><div class="markdown-body">${parsedAnswer}</div>`;
+            
+            if (sources && sources.length > 0) {
+                let sourcesHtml = `
+                <div class="sources-accordion">
+                    <div class="sources-header" onclick="toggleSources(this)">
+                        <span>View Retrieved Sources (${sources.length})</span>
+                        <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition: transform 0.2s;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </div>
+                    <div class="sources-body">
+                `;
+                
+                sources.forEach((source, index) => {
+                    const snippet = source.page_content.substring(0, 200).trim() + '...';
+                    const filename = source.metadata.source ? source.metadata.source.split(/[/\\]/).pop() : 'Document';
+                    const page = source.metadata.page !== undefined ? ` • Page ${source.metadata.page}` : '';
+                    
+                    sourcesHtml += `
+                        <div class="source-item">
+                            <div class="source-meta">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                                ${filename}${page}
+                            </div>
+                            <div style="opacity: 0.8; line-height: 1.5;">"${snippet}"</div>
+                        </div>
+                    `;
+                });
+                
+                sourcesHtml += `</div></div>`;
+                bubbleHtml += sourcesHtml;
+            }
+            
+            bubbleHtml += `</div>`;
+            row.innerHTML = bubbleHtml;
+            chatHistory.appendChild(row);
             chatHistory.scrollTop = chatHistory.scrollHeight;
         }
 
-        function showTypingIndicator() {
-            const indicator = document.createElement('div');
-            indicator.className = 'typing-indicator';
-            indicator.id = 'typingIndicator';
-            indicator.innerHTML = '<div class="dot"></div><div class="dot"></div><div class="dot"></div>';
-            chatHistory.appendChild(indicator);
+        function showTyping() {
+            const row = document.createElement('div');
+            row.className = 'message-row ai typing-row';
+            row.id = 'typingIndicator';
+            row.innerHTML = `
+                <div class="message-bubble">
+                    <div class="typing"><span></span><span></span><span></span></div>
+                </div>
+            `;
+            chatHistory.appendChild(row);
             chatHistory.scrollTop = chatHistory.scrollHeight;
         }
 
-        function removeTypingIndicator() {
-            const indicator = document.getElementById('typingIndicator');
-            if (indicator) indicator.remove();
+        function removeTyping() {
+            const el = document.getElementById('typingIndicator');
+            if (el) el.remove();
         }
 
         chatForm.addEventListener('submit', async (e) => {
@@ -532,9 +809,11 @@
             const text = userInput.value.trim();
             if (!text) return;
 
-            appendMessage(text, true);
+            appendUserMessage(text);
             userInput.value = '';
-            showTypingIndicator();
+            userInput.disabled = true;
+            sendBtn.disabled = true;
+            showTyping();
 
             try {
                 const response = await fetch('/query/', {
@@ -547,38 +826,20 @@
                 });
 
                 const data = await response.json();
-                removeTypingIndicator();
+                removeTyping();
 
                 if (response.ok) {
-                    let aiContent = `<p style="margin:0 0 10px 0">${data.answer}</p>`;
-                    
-                    if (data.sources && data.sources.length > 0) {
-                        aiContent += `<div class="sources"><strong style="color:var(--text-main)">Sources:</strong>`;
-                        data.sources.forEach(source => {
-                            const snippet = source.page_content.substring(0, 150) + '...';
-                            const metadata = source.metadata.source ? source.metadata.source.split('\\').pop().split('/').pop() : 'Document';
-                            const page = source.metadata.page !== undefined ? `(Page ${source.metadata.page})` : '';
-                            
-                            aiContent += `
-                                <div class="source-item" title="Click to view more">
-                                    <div class="source-title">
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                                        ${metadata} ${page}
-                                    </div>
-                                    <div style="opacity:0.8; font-size:0.8rem; line-height:1.4">${snippet}</div>
-                                </div>
-                            `;
-                        });
-                        aiContent += `</div>`;
-                    }
-                    
-                    appendMessage(aiContent, false);
+                    appendAIMessage(data.answer, data.sources);
                 } else {
-                    appendMessage(`<span style="color: #ef4444;">Error: ${data.error || 'Something went wrong.'}</span>`, false);
+                    showToast(data.error || 'Query failed', 'error');
                 }
             } catch (error) {
-                removeTypingIndicator();
-                appendMessage(`<span style="color: #ef4444;">Network Error: ${error.message}</span>`, false);
+                removeTyping();
+                showToast('Network Error', 'error');
+            } finally {
+                userInput.disabled = false;
+                sendBtn.disabled = false;
+                userInput.focus();
             }
         });
     </script>
