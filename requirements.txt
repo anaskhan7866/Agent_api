@@ -9,3 +9,5 @@ openai
 pandas
 plotly
 python-dotenv
+pypdf
+langchain-community
