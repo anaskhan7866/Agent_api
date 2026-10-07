@@ -5,6 +5,7 @@ from .rag_service import query_rag, ingest_single_pdf
 import os
 from django.conf import settings
 from rest_framework.parsers import MultiPartParser
+from django.views.generic import TemplateView
 
 class QueryRAGView(APIView):
     def post(self, request, *args, **kwargs):
@@ -17,8 +18,6 @@ class QueryRAGView(APIView):
             return Response(result, status=status.HTTP_200_OK)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-from django.views.generic import TemplateView
 
 class ChatInterfaceView(TemplateView):
     template_name = 'agent_api/chat.html'
