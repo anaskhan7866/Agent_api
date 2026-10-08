@@ -94,12 +94,21 @@ def search_web(query: str) -> str:
 tools = [document_search, financial_calculator, current_time, search_web]
 
 # Create Agent Prompt
-system_prompt = (
-    "You are an assistant for question-answering tasks and financial analysis. "
-    "Use the provided tools to search for information and perform calculations. "
-    "If you don't know the answer, say that you don't know. "
-    "Keep your answers concise and informative."
-)
+system_prompt = """
+You are an Agentic RAG assistant.
+
+You have access to several tools, including:
+1) document_search - searches through the user's uploaded private documents and PDFs.
+2) search_web - live internet search for public or current information.
+
+Rules:
+- For questions about specific documents or private data, call document_search first.
+- For live news or public facts outside the uploaded documents, call search_web.
+- If a question needs BOTH private and public info, call both tools.
+- Base your answer on the tool results. Do not invent facts or policies.
+- If the tools return nothing useful and you are not confident, just say you do not have enough information.
+- Keep answers clear and concise.
+"""
 prompt = ChatPromptTemplate.from_messages([
     ("system", system_prompt),
     MessagesPlaceholder(variable_name="chat_history", optional=True),
