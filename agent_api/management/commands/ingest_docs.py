@@ -1,4 +1,6 @@
 import os
+import time
+import random
 from django.core.management.base import BaseCommand
 from django.conf import settings
 from langchain_community.document_loaders import PyPDFDirectoryLoader
@@ -49,33 +51,52 @@ class Command(BaseCommand):
             self.stdout.write(f"Successfully created {len(chunks)} chunks.")
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"Error splitting documents: {e}"))
+            # Ensure you return or exit here in your actual script
             return
 
         # 3. Initialize Embeddings and Save to Chroma
         try:
             self.stdout.write("Initializing Google Generative AI embeddings...")
+            # Reverting back to user's original valid model
             embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2")
 
             self.stdout.write(f"Saving chunked documents to Chroma DB at {chroma_db_dir}...")
             
-            import time
             vector_db = Chroma(persist_directory=chroma_db_dir, embedding_function=embeddings)
-            batch_size = 50
+            
+            # UPGRADE 1: Maximize batch size for Gemini API (Max 100)
+            batch_size = 100 
+            
             for i in range(0, len(chunks), batch_size):
                 batch = chunks[i:i+batch_size]
                 success = False
-                while not success:
+                
+                # UPGRADE 2: Setup exponential backoff variables
+                max_retries = 6
+                base_delay = 2 # Start with a 2-second wait
+                retries = 0
+                
+                while not success and retries < max_retries:
                     try:
                         vector_db.add_documents(batch)
                         success = True
                         self.stdout.write(f"Embedded batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}")
+                    
                     except Exception as e:
                         if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                            self.stdout.write(f"Rate limit hit! Sleeping 60 seconds before retrying batch {i//batch_size + 1}...")
-                            time.sleep(60)
+                            # Calculate delay: 2s, 4s, 8s, 16s, 32s... plus slight random jitter
+                            delay = base_delay * (2 ** retries) + random.uniform(0, 1)
+                            self.stdout.write(self.style.WARNING(f"Rate limit hit! Sleeping {delay:.2f} seconds before retrying..."))
+                            time.sleep(delay)
+                            retries += 1
                         else:
+                            # If it's a different error (like network failure or bad data), crash immediately
                             raise e
+                            
+                if not success:
+                    self.stdout.write(self.style.ERROR(f"Failed to embed batch {i//batch_size + 1} after {max_retries} retries. Skipping."))
 
             self.stdout.write(self.style.SUCCESS(f"Success! Embedded and saved {len(chunks)} chunks to the vector database."))
+
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"Error during embedding or database insertion: {e}"))

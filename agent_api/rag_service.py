@@ -1,6 +1,8 @@
 import os
 import time
 import datetime
+import ast
+import operator
 from django.conf import settings
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -14,7 +16,7 @@ from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.messages import HumanMessage, AIMessage
 
 # Initialize Embeddings
-embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-2", transport="rest")
+embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2", transport="rest")
 
 # Initialize Chroma DB
 CHROMA_PATH = os.path.join(settings.BASE_DIR, 'data', 'chroma_db')
@@ -24,7 +26,7 @@ vector_store = Chroma(persist_directory=CHROMA_PATH, embedding_function=embeddin
 retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 
 # Initialize LLM
-llm = ChatGoogleGenerativeAI(model="gemini-3.6-flash", temperature=0)
+llm = ChatGoogleGenerativeAI(model="gemini-3.8-flash", temperature=0)
 
 # Setup Tools
 document_search = create_retriever_tool(
@@ -33,11 +35,23 @@ document_search = create_retriever_tool(
     "Primary tool for finding qualitative information in financial reports."
 )
 
+def _safe_eval(node):
+    operators = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+                 ast.Div: operator.truediv, ast.Pow: operator.pow, ast.USub: operator.neg}
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    elif isinstance(node, ast.BinOp):
+        return operators[type(node.op)](_safe_eval(node.left), _safe_eval(node.right))
+    elif isinstance(node, ast.UnaryOp):
+        return operators[type(node.op)](_safe_eval(node.operand))
+    raise TypeError("Unsupported mathematical operation.")
+
 @tool
 def financial_calculator(expression: str) -> str:
     """Accepts and evaluates basic mathematical expressions (like adding revenue or calculating margins)."""
     try:
-        return str(eval(expression, {"__builtins__": None}, {}))
+        parsed = ast.parse(expression, mode='eval')
+        return str(_safe_eval(parsed.body))
     except Exception as e:
         return f"Error evaluating expression: {e}"
 
@@ -84,7 +98,12 @@ def query_rag(query_text: str, history: list = None):
         "input": query_text,
         "chat_history": chat_history
     })
-    answer = response["output"]
+    
+    raw_answer = response["output"]
+    if isinstance(raw_answer, list):
+        answer = "".join([part.get("text", "") for part in raw_answer if isinstance(part, dict) and "text" in part])
+    else:
+        answer = str(raw_answer)
     
     sources = []
     for doc in docs:
@@ -107,6 +126,9 @@ def ingest_single_pdf(file_path: str):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1500, chunk_overlap=150)
     chunks = text_splitter.split_documents(documents)
     
+    if not chunks:
+        raise ValueError("The uploaded PDF contains no extractable text. It may be an image-based or scanned document.")
+        
     # Let LangChain handle the batching internally (it optimizes payload size)
     # Use exponential backoff for rate limits instead of a flat 60 seconds
     retry_delay = 5

@@ -1,3 +1,4 @@
+import traceback
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -18,6 +19,7 @@ class QueryRAGView(APIView):
             result = query_rag(query, history)
             return Response(result, status=status.HTTP_200_OK)
         except Exception as e:
+            traceback.print_exc()
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class ChatInterfaceView(TemplateView):
@@ -49,6 +51,7 @@ class UploadPDFView(APIView):
                 os.remove(file_path)
             return Response({"message": f"Successfully deleted {filename} ({removed_chunks} chunks removed)."}, status=status.HTTP_200_OK)
         except Exception as e:
+            traceback.print_exc()
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def post(self, request, *args, **kwargs):
@@ -70,4 +73,5 @@ class UploadPDFView(APIView):
             chunks_processed = ingest_single_pdf(file_path)
             return Response({"message": f"Successfully ingested {file_obj.name} ({chunks_processed} chunks added)."}, status=status.HTTP_200_OK)
         except Exception as e:
+            traceback.print_exc()
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
