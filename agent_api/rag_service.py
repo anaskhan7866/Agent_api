@@ -3,6 +3,8 @@ import time
 import datetime
 import ast
 import operator
+import json
+import http.client
 from django.conf import settings
 from langchain_chroma import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -31,8 +33,8 @@ llm = ChatGoogleGenerativeAI(model="gemini-3.8-flash", temperature=0)
 # Setup Tools
 document_search = create_retriever_tool(
     retriever,
-    "document_search",
-    "Primary tool for finding qualitative information in financial reports."
+    "doarch",
+    "Primary tool for fcument_seinding qualitative information in financial reports."
 )
 
 def _safe_eval(node):
@@ -60,7 +62,36 @@ def current_time(query: str = "") -> str:
     """Returns the current date and time. Useful when the user asks for things relative to 'now', 'today', 'this year', etc."""
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-tools = [document_search, financial_calculator, current_time]
+@tool
+def search_web(query: str) -> str:
+    """
+    Search the live web for current public information.
+    Use this for news, sports, current events, or anything NOT in the indexed documents.
+    """
+    if not query or not query.strip():
+        return "No query provided."
+    
+    SERPAPI_API_KEY = os.environ.get("SERPAPI_API_KEY")
+    if not SERPAPI_API_KEY:
+        return "SERPAPI_API_KEY is missing in .env. Cannot search the web."
+    
+    # Serper (google.serper.dev) is a Google Search API wrapper
+    conn = http.client.HTTPSConnection("google.serper.dev")
+    payload = json.dumps({"q": query})
+    headers = {
+        "X-API-KEY": SERPAPI_API_KEY,
+        "Content-Type": "application/json",
+    }
+    try:
+        conn.request("POST", "/search", payload, headers)
+        res = conn.getresponse()
+        data = res.read().decode("utf-8")
+        print(f"[Web] Search for '{query}' returned {len(data)} bytes")
+        return data
+    except Exception as e:
+        return f"Web search failed: {str(e)}"
+
+tools = [document_search, financial_calculator, current_time, search_web]
 
 # Create Agent Prompt
 system_prompt = (
