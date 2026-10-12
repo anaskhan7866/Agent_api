@@ -12,7 +12,7 @@ from pathlib import Path
 
 from django.conf import settings
 from langchain_chroma import Chroma
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -112,15 +112,19 @@ vector_store = get_vector_store()
 # Set up retriever
 retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 
-# Initialize LLM
-model_name = getattr(settings, 'GEMINI_MODEL_NAME', 'gemini-3.5-flash')
-llm = ChatGoogleGenerativeAI(model=model_name, temperature=0)
+# Initialize Ollama LLM
+def get_llm():
+    model_name = getattr(settings, 'OLLAMA_MODEL_NAME', 'qwen2.5:3b')
+    base_url = getattr(settings, 'OLLAMA_BASE_URL', 'http://127.0.0.1:11434')
+    return ChatOllama(model=model_name, base_url=base_url, temperature=0)
+
+llm = get_llm()
 
 # Setup Tools
 document_search = create_retriever_tool(
     retriever,
     "document_search",
-    "Primary tool for finding qualitative information in uploaded documents and reports."
+    "Primary tool for finding qualitative information in uploaded documents, resumes, and reports. Search this whenever the user asks about people, experience, qualifications, facts, or content in the knowledge base."
 )
 
 def _safe_eval(node):
@@ -195,15 +199,16 @@ system_prompt = """
 You are an Agentic RAG assistant.
 
 You have access to several tools, including:
-1) document_search - searches through the user's uploaded private documents and PDFs.
+1) document_search - searches through the user's uploaded private documents, resumes, and PDFs.
 2) search_web - live internet search for public or current information.
 
 Rules:
-- For questions about specific documents or private data, call document_search first.
+- For questions about specific documents, people, resumes, or private data, you MUST call document_search.
+- When the user provides a follow-up answer or clarification (such as a person's name like "Annus", role, or brief keyword answering a previous question), combine it with the previous context from chat history (e.g. searching for the person's experience) and ALWAYS call document_search first with an informative search query.
+- Do NOT declare that you do not have enough information before calling document_search.
 - For live news or public facts outside the uploaded documents, call search_web.
 - If a question needs BOTH private and public info, call both tools.
 - Base your answer on the tool results. Do not invent facts or policies.
-- If the tools return nothing useful and you are not confident, just say you do not have enough information.
 - Keep answers clear and concise.
 """
 prompt = ChatPromptTemplate.from_messages([
@@ -227,8 +232,16 @@ def query_rag(query_text: str, history: list = None):
         else:
             chat_history.append(AIMessage(content=msg.get('content', '')))
             
+    # If the user query is a short follow-up (e.g. fewer than 4 words) and there is chat history,
+    # enrich the retrieval query with recent user context so citations reflect the full question.
+    search_query = query_text
+    if len(query_text.strip().split()) <= 3 and chat_history:
+        last_user_msgs = [m.content for m in chat_history if isinstance(m, HumanMessage)]
+        if last_user_msgs:
+            search_query = f"{last_user_msgs[-1]} {query_text}".strip()
+
     # Fetch documents manually to have them for sources
-    docs = retriever.invoke(query_text)
+    docs = retriever.invoke(search_query)
     
     # Generate answer using the agent
     response = agent_executor.invoke({

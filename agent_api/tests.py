@@ -810,6 +810,7 @@ class LocalEmbeddingsAndRAGTestCase(TestCase):
         ]
         mock_retriever = MagicMock()
         mock_retriever.invoke.return_value = mock_docs
+        
         mock_executor = MagicMock()
         mock_executor.invoke.return_value = {"output": "Revenue grew by 18% in Q3."}
         with patch('agent_api.rag_service.retriever', mock_retriever), \
@@ -926,4 +927,78 @@ class LocalEmbeddingsAndRAGTestCase(TestCase):
         self.assertGreaterEqual(recall_at_3, 0.90, f"Expected Recall@3 >= 0.90, got {recall_at_3}")
 
 
+class OllamaIntegrationTestCase(TestCase):
+    """
+    Automated test suite verifying the complete replacement of Gemini with Ollama (qwen2.5:3b),
+    ensuring no Gemini imports or active calls remain, and verifying RAG responses and citations.
+    """
+    def setUp(self):
+        super().setUp()
+        cache.clear()
 
+    def test_ollama_llm_initialization_with_settings(self):
+        """Verify get_llm() initializes ChatOllama using configured model and base URL."""
+        from agent_api.rag_service import get_llm
+        from langchain_ollama import ChatOllama
+
+        with override_settings(OLLAMA_MODEL_NAME='qwen2.5:3b', OLLAMA_BASE_URL='http://127.0.0.1:11434'):
+            llm_instance = get_llm()
+            self.assertIsInstance(llm_instance, ChatOllama)
+            self.assertEqual(llm_instance.model, 'qwen2.5:3b')
+            self.assertEqual(llm_instance.base_url, 'http://127.0.0.1:11434')
+
+    def test_no_gemini_dependencies_or_imports_remain(self):
+        """Verify langchain_google_genai is completely removed and not present in rag_service or settings."""
+        import sys
+        import agent_api.rag_service as rag_module
+
+        # Ensure langchain_google_genai is not imported in rag_service
+        self.assertFalse(hasattr(rag_module, 'ChatGoogleGenerativeAI'))
+        self.assertFalse(hasattr(rag_module, 'GoogleGenerativeAIEmbeddings'))
+        self.assertNotIn('langchain_google_genai', sys.modules)
+
+        # Verify neither rag_service nor settings require GOOGLE_API_KEY
+        self.assertFalse(hasattr(settings, 'GOOGLE_API_KEY'))
+
+    def test_query_rag_returns_answer_and_preserves_citations(self):
+        """Verify query_rag() with Ollama agent formats answer and returns document source citations."""
+        from agent_api.rag_service import query_rag
+        from langchain_core.documents import Document
+        from unittest.mock import MagicMock
+
+        mock_docs = [
+            Document(page_content="Net income grew to $2.1 billion in fiscal 2025.", metadata={"source": "data/raw_docs/annual_report.pdf", "page": 4})
+        ]
+        mock_retriever = MagicMock()
+        mock_retriever.invoke.return_value = mock_docs
+
+        mock_executor = MagicMock()
+        mock_executor.invoke.return_value = {"output": "Net income reached $2.1B according to the 2025 annual report."}
+
+        with patch('agent_api.rag_service.retriever', mock_retriever), \
+             patch('agent_api.rag_service.agent_executor', mock_executor):
+            result = query_rag("What was the annual net income?")
+            self.assertIn("answer", result)
+            self.assertIn("sources", result)
+            self.assertEqual(result["answer"], "Net income reached $2.1B according to the 2025 annual report.")
+            self.assertEqual(len(result["sources"]), 1)
+            self.assertEqual(result["sources"][0]["metadata"]["page"], 4)
+            self.assertIn("annual_report.pdf", result["sources"][0]["metadata"]["source"])
+
+    def test_live_ollama_invocation_if_server_available(self):
+        """Test live Ollama model invocation if local server is active, otherwise skip gracefully."""
+        import urllib.request
+        try:
+            with urllib.request.urlopen('http://127.0.0.1:11434/api/tags', timeout=2) as resp:
+                is_available = resp.status == 200
+        except Exception:
+            is_available = False
+
+        if not is_available:
+            self.skipTest("Local Ollama server is not running on http://127.0.0.1:11434")
+
+        from agent_api.rag_service import get_llm
+        llm = get_llm()
+        resp = llm.invoke("Respond with the single word: PONG")
+        self.assertIsInstance(resp.content, str)
+        self.assertGreater(len(resp.content), 0)

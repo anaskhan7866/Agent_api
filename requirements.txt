@@ -5,7 +5,8 @@ langchain
 langchain-community
 langchain-chroma
 chromadb
-langchain-google-genai
+langchain-ollama
+ollama
 langchain-huggingface
 sentence-transformers
 torch
