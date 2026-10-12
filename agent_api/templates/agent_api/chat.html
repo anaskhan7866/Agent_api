@@ -10,6 +10,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- Marked.js for Markdown parsing -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- DOMPurify for sanitizing Markdown output -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
     
     <style>
         :root {
@@ -616,26 +618,44 @@
     <div id="toast-container"></div>
 
     <script>
-        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        // Retrieve CSRF token securely
+        function getCsrfToken() {
+            const input = document.querySelector('[name=csrfmiddlewaretoken]');
+            if (input && input.value) return input.value;
+            const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+            return match ? decodeURIComponent(match[1]) : '';
+        }
+
+        const MAX_UPLOAD_SIZE = 50 * 1024 * 1024; // 50 MB default
         
-        // Configure marked.js for safe markdown rendering
+        // Configure marked.js
         marked.setOptions({
             breaks: true,
             gfm: true
         });
 
-        // Toast Notification System
+        // Toast Notification System with safe DOM text content
         function showToast(message, type = 'info') {
             const container = document.getElementById('toast-container');
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
             
-            let icon = '';
-            if(type === 'success') icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>';
-            else if(type === 'error') icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>';
-            else icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
+            const iconSpan = document.createElement('span');
+            iconSpan.style.display = 'flex';
+            iconSpan.style.alignItems = 'center';
+            if (type === 'success') {
+                iconSpan.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+            } else if (type === 'error') {
+                iconSpan.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>';
+            } else {
+                iconSpan.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>';
+            }
             
-            toast.innerHTML = `${icon} <div>${message}</div>`;
+            const msgDiv = document.createElement('div');
+            msgDiv.textContent = message; // Safe text insertion
+            
+            toast.appendChild(iconSpan);
+            toast.appendChild(msgDiv);
             container.appendChild(toast);
             
             setTimeout(() => {
@@ -675,13 +695,26 @@
             dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'));
         });
 
-        dropZone.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
-        fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
+        dropZone.addEventListener('drop', e => {
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+        fileInput.addEventListener('change', e => {
+            if (e.target && e.target.files && e.target.files[0]) {
+                handleFile(e.target.files[0]);
+            }
+        });
 
         async function handleFile(file) {
             if (!file) return;
             if (!file.name.toLowerCase().endsWith('.pdf')) {
                 showToast('Invalid file format. Please upload a PDF.', 'error');
+                return;
+            }
+
+            if (file.size > MAX_UPLOAD_SIZE) {
+                showToast(`File exceeds the maximum limit of ${MAX_UPLOAD_SIZE / (1024 * 1024)}MB.`, 'error');
                 return;
             }
 
@@ -693,14 +726,17 @@
             try {
                 const response = await fetch('/upload/', {
                     method: 'POST',
-                    headers: { 'X-CSRFToken': csrfToken },
+                    headers: { 'X-CSRFToken': getCsrfToken() },
                     body: formData
                 });
                 
-                const data = await response.json();
+                let data = {};
+                try {
+                    data = await response.json();
+                } catch (_) {}
                 
                 if (response.ok) {
-                    showToast(data.message, 'success');
+                    showToast(data.message || 'File uploaded and indexed successfully.', 'success');
                     loadFiles(); // Refresh file list
                     setTimeout(() => document.querySelectorAll('.nav-item')[2].click(), 1000);
                 } else {
@@ -716,28 +752,80 @@
             const fileList = document.getElementById('fileList');
             try {
                 const response = await fetch('/upload/');
-                const data = await response.json();
-                if (response.ok) {
+                let data = {};
+                try {
+                    data = await response.json();
+                } catch (_) {}
+
+                if (response.ok && Array.isArray(data.files)) {
+                    fileList.innerHTML = '';
                     if (data.files.length === 0) {
-                        fileList.innerHTML = '<p style="color: var(--text-secondary); font-size: 0.875rem;">No documents uploaded yet.</p>';
+                        const emptyMsg = document.createElement('p');
+                        emptyMsg.style.color = 'var(--text-secondary)';
+                        emptyMsg.style.fontSize = '0.875rem';
+                        emptyMsg.textContent = 'No documents uploaded yet.';
+                        fileList.appendChild(emptyMsg);
                         return;
                     }
-                    fileList.innerHTML = data.files.map(file => `
-                        <div style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-surface); border: 1px solid var(--border-light); padding: 12px 16px; border-radius: var(--radius-md);">
-                            <div style="display: flex; align-items: center; gap: 12px;">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                                <span style="font-weight: 500; font-size: 0.9375rem;">${file}</span>
-                            </div>
-                            <button onclick="deleteFile('${file}')" style="background: none; border: none; color: #ef4444; cursor: pointer; padding: 4px; display: flex; align-items: center;">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-                            </button>
-                        </div>
-                    `).join('');
+
+                    data.files.forEach(file => {
+                        const row = document.createElement('div');
+                        row.style.display = 'flex';
+                        row.style.justifyContent = 'space-between';
+                        row.style.alignItems = 'center';
+                        row.style.background = 'var(--bg-surface)';
+                        row.style.border = '1px solid var(--border-light)';
+                        row.style.padding = '12px 16px';
+                        row.style.borderRadius = 'var(--radius-md)';
+
+                        const left = document.createElement('div');
+                        left.style.display = 'flex';
+                        left.style.alignItems = 'center';
+                        left.style.gap = '12px';
+
+                        const icon = document.createElement('span');
+                        icon.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
+                        
+                        const nameSpan = document.createElement('span');
+                        nameSpan.style.fontWeight = '500';
+                        nameSpan.style.fontSize = '0.9375rem';
+                        nameSpan.textContent = file; // Safe text insertion
+                        
+                        left.appendChild(icon);
+                        left.appendChild(nameSpan);
+
+                        const delBtn = document.createElement('button');
+                        delBtn.type = 'button';
+                        delBtn.style.background = 'none';
+                        delBtn.style.border = 'none';
+                        delBtn.style.color = '#ef4444';
+                        delBtn.style.cursor = 'pointer';
+                        delBtn.style.padding = '4px';
+                        delBtn.style.display = 'flex';
+                        delBtn.style.alignItems = 'center';
+                        delBtn.setAttribute('aria-label', `Delete ${file}`);
+                        delBtn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>';
+                        delBtn.addEventListener('click', () => deleteFile(file));
+
+                        row.appendChild(left);
+                        row.appendChild(delBtn);
+                        fileList.appendChild(row);
+                    });
                 } else {
-                    fileList.innerHTML = '<p style="color: #ef4444; font-size: 0.875rem;">Failed to load documents.</p>';
+                    fileList.innerHTML = '';
+                    const errMsg = document.createElement('p');
+                    errMsg.style.color = '#ef4444';
+                    errMsg.style.fontSize = '0.875rem';
+                    errMsg.textContent = 'Failed to load documents.';
+                    fileList.appendChild(errMsg);
                 }
             } catch (error) {
-                fileList.innerHTML = '<p style="color: #ef4444; font-size: 0.875rem;">Network error loading documents.</p>';
+                fileList.innerHTML = '';
+                const errMsg = document.createElement('p');
+                errMsg.style.color = '#ef4444';
+                errMsg.style.fontSize = '0.875rem';
+                errMsg.textContent = 'Network error loading documents.';
+                fileList.appendChild(errMsg);
             }
         }
         
@@ -750,14 +838,18 @@
                     method: 'DELETE',
                     headers: { 
                         'Content-Type': 'application/json',
-                        'X-CSRFToken': csrfToken 
+                        'X-CSRFToken': getCsrfToken() 
                     },
                     body: JSON.stringify({ filename: filename })
                 });
                 
-                const data = await response.json();
+                let data = {};
+                try {
+                    data = await response.json();
+                } catch (_) {}
+
                 if (response.ok) {
-                    showToast(data.message, 'success');
+                    showToast(data.message || 'File deleted successfully.', 'success');
                     loadFiles(); // Refresh file list
                 } else {
                     showToast(data.error || 'Failed to delete file', 'error');
@@ -792,7 +884,12 @@
         function appendUserMessage(text) {
             const row = document.createElement('div');
             row.className = 'message-row user';
-            row.innerHTML = `<div class="message-bubble"><p>${text}</p></div>`;
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            const p = document.createElement('p');
+            p.textContent = text; // Safe text assignment
+            bubble.appendChild(p);
+            row.appendChild(bubble);
             chatHistory.appendChild(row);
             chatHistory.scrollTop = chatHistory.scrollHeight;
         }
@@ -813,43 +910,72 @@
             const row = document.createElement('div');
             row.className = 'message-row ai';
             
-            // Parse Markdown for the answer
-            const parsedAnswer = marked.parse(answer);
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
             
-            let bubbleHtml = `<div class="message-bubble"><div class="markdown-body">${parsedAnswer}</div>`;
+            // Parse Markdown and sanitize with DOMPurify
+            const markdownContainer = document.createElement('div');
+            markdownContainer.className = 'markdown-body';
+            const rawParsed = marked.parse(answer || '');
+            markdownContainer.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawParsed) : rawParsed;
+            bubble.appendChild(markdownContainer);
             
             if (sources && sources.length > 0) {
-                let sourcesHtml = `
-                <div class="sources-accordion">
-                    <div class="sources-header" onclick="toggleSources(this)">
-                        <span>View Retrieved Sources (${sources.length})</span>
-                        <svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition: transform 0.2s;"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                    </div>
-                    <div class="sources-body">
-                `;
+                const accordion = document.createElement('div');
+                accordion.className = 'sources-accordion';
+
+                const header = document.createElement('div');
+                header.className = 'sources-header';
+                header.onclick = function() { toggleSources(this); };
+
+                const headerTitle = document.createElement('span');
+                headerTitle.textContent = `View Retrieved Sources (${sources.length})`;
                 
-                sources.forEach((source, index) => {
-                    const snippet = source.page_content.substring(0, 200).trim() + '...';
-                    const filename = source.metadata.source ? source.metadata.source.split(/[/\\]/).pop() : 'Document';
-                    const page = source.metadata.page !== undefined ? ` • Page ${source.metadata.page}` : '';
+                const headerIcon = document.createElement('span');
+                headerIcon.innerHTML = '<svg class="chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transition: transform 0.2s;"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+
+                header.appendChild(headerTitle);
+                header.appendChild(headerIcon);
+                accordion.appendChild(header);
+
+                const body = document.createElement('div');
+                body.className = 'sources-body';
+
+                sources.forEach((source) => {
+                    const rawSnippet = (source.page_content || '').substring(0, 200).trim() + '...';
+                    const rawFilename = source.metadata && source.metadata.source ? source.metadata.source.split(/[/\\]/).pop() : 'Document';
+                    const pageText = source.metadata && source.metadata.page !== undefined ? ` • Page ${source.metadata.page}` : '';
+
+                    const item = document.createElement('div');
+                    item.className = 'source-item';
+
+                    const meta = document.createElement('div');
+                    meta.className = 'source-meta';
                     
-                    sourcesHtml += `
-                        <div class="source-item">
-                            <div class="source-meta">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
-                                ${filename}${page}
-                            </div>
-                            <div style="opacity: 0.8; line-height: 1.5;">"${snippet}"</div>
-                        </div>
-                    `;
+                    const docIcon = document.createElement('span');
+                    docIcon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
+                    
+                    const metaLabel = document.createElement('span');
+                    metaLabel.textContent = `${rawFilename}${pageText}`; // Safe text assignment
+
+                    meta.appendChild(docIcon);
+                    meta.appendChild(metaLabel);
+
+                    const snippetDiv = document.createElement('div');
+                    snippetDiv.style.opacity = '0.8';
+                    snippetDiv.style.lineHeight = '1.5';
+                    snippetDiv.textContent = `"${rawSnippet}"`; // Safe text assignment
+
+                    item.appendChild(meta);
+                    item.appendChild(snippetDiv);
+                    body.appendChild(item);
                 });
-                
-                sourcesHtml += `</div></div>`;
-                bubbleHtml += sourcesHtml;
+
+                accordion.appendChild(body);
+                bubble.appendChild(accordion);
             }
             
-            bubbleHtml += `</div>`;
-            row.innerHTML = bubbleHtml;
+            row.appendChild(bubble);
             chatHistory.appendChild(row);
             chatHistory.scrollTop = chatHistory.scrollHeight;
         }
@@ -888,12 +1014,15 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-CSRFToken': csrfToken
+                        'X-CSRFToken': getCsrfToken()
                     },
                     body: JSON.stringify({ query: text, history: chatHistoryData })
                 });
 
-                const data = await response.json();
+                let data = {};
+                try {
+                    data = await response.json();
+                } catch (_) {}
                 removeTyping();
 
                 if (response.ok) {

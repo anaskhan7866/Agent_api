@@ -1,102 +1,187 @@
+import logging
 import os
 import time
-import random
-from django.core.management.base import BaseCommand
+from pathlib import Path
 from django.conf import settings
-from langchain_community.document_loaders import PyPDFDirectoryLoader
+from django.core.management.base import BaseCommand, CommandError
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_chroma import Chroma
+from agent_api.rag_service import DocumentIdentity, IngestionState, get_embeddings
+
+logger = logging.getLogger('agent_api')
+
 
 class Command(BaseCommand):
-    help = 'Processes raw documents (PDFs) and loads them into a local Chroma vector database using LangChain.'
+    help = 'Processes raw documents (PDFs) and loads them into a local Chroma vector database using local BGE embeddings idempotently.'
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--batch-size',
+            type=int,
+            default=100,
+            help='Batch size for vector ingestion (default: 100)'
+        )
 
     def handle(self, *args, **options):
-        self.stdout.write(self.style.SUCCESS('Starting document ingestion...'))
+        self.stdout.write(self.style.SUCCESS('Starting document ingestion with local embeddings...'))
 
-        # Define directories relative to Django BASE_DIR
-        base_dir = settings.BASE_DIR
-        raw_docs_dir = os.path.join(base_dir, 'data', 'raw_docs')
-        chroma_db_dir = os.path.join(base_dir, 'data', 'chroma_db')
+        raw_docs_dir = Path(getattr(settings, 'DOCS_STORAGE_DIR', os.path.join(settings.BASE_DIR, 'data', 'raw_docs'))).resolve()
+        chroma_db_dir = str(getattr(settings, 'CHROMA_PATH', os.path.join(settings.BASE_DIR, 'data', 'chroma_db')))
+        collection_name = getattr(settings, 'CHROMA_COLLECTION_NAME', 'pdf_documents_bge_small_v1')
+        chunk_size = int(getattr(settings, 'RAG_CHUNK_SIZE', 1000))
+        chunk_overlap = int(getattr(settings, 'RAG_CHUNK_OVERLAP', 150))
 
-        # Ensure raw_docs_dir exists
-        if not os.path.exists(raw_docs_dir):
-            os.makedirs(raw_docs_dir)
+        if not raw_docs_dir.exists():
+            raw_docs_dir.mkdir(parents=True, exist_ok=True)
             self.stdout.write(self.style.WARNING(f"Created directory {raw_docs_dir}. Please add PDF files there and run again."))
             return
 
-        # 1. Load PDF documents
-        self.stdout.write(f"Loading PDFs from {raw_docs_dir}...")
-        try:
-            loader = PyPDFDirectoryLoader(raw_docs_dir)
-            documents = loader.load()
-        except Exception as e:
-            self.stdout.write(self.style.ERROR(f"Error loading PDFs: {e}"))
-            return
-
-        if not documents:
+        pdf_files = sorted([f for f in raw_docs_dir.iterdir() if f.is_file() and f.name.lower().endswith('.pdf')])
+        if not pdf_files:
             self.stdout.write(self.style.WARNING("No PDF documents found in the data/raw_docs/ directory."))
             return
-            
-        self.stdout.write(f"Successfully loaded {len(documents)} document pages.")
 
-        # 2. Split text into chunks
-        self.stdout.write("Splitting documents into chunks...")
-        try:
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=800,
-                chunk_overlap=100
+        self.stdout.write(f"Found {len(pdf_files)} PDF document(s) in {raw_docs_dir}...")
+
+        all_chunks = []
+        all_chunk_ids = []
+        doc_chunks_map = {}
+        processed_docs_count = 0
+        skipped_docs_count = 0
+
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
+
+        for pdf_path in pdf_files:
+            doc_identity = DocumentIdentity.create(pdf_path.name)
+            doc_id = doc_identity.doc_id
+
+            logger.info(
+                "Command ingestion state: %s for %s [doc_id=%s]",
+                IngestionState.PROCESSING, doc_identity.display_name, doc_id,
+                extra={"doc_id": doc_id, "state": IngestionState.PROCESSING, "doc_name": doc_identity.display_name}
             )
-            chunks = text_splitter.split_documents(documents)
-            self.stdout.write(f"Successfully created {len(chunks)} chunks.")
-        except Exception as e:
-            self.stdout.write(self.style.ERROR(f"Error splitting documents: {e}"))
-            # Ensure you return or exit here in your actual script
+
+            try:
+                loader = PyPDFLoader(str(pdf_path))
+                documents = loader.load()
+            except Exception as e:
+                self.stdout.write(self.style.ERROR(f"Error loading {pdf_path.name}: {e}"))
+                logger.error("Failed to load PDF in ingest_docs: %s (%s)", pdf_path.name, e)
+                skipped_docs_count += 1
+                continue
+
+            if not documents:
+                self.stdout.write(self.style.WARNING(f"Document {pdf_path.name} contains no pages. Skipping."))
+                skipped_docs_count += 1
+                continue
+
+            doc_chunks = text_splitter.split_documents(documents)
+            if not doc_chunks:
+                self.stdout.write(self.style.WARNING(f"Document {pdf_path.name} contains no extractable text. Skipping."))
+                skipped_docs_count += 1
+                continue
+
+            doc_ids_for_file = []
+            for idx, chunk in enumerate(doc_chunks):
+                chunk_id = f"{doc_id}_chunk_{idx}"
+                page = chunk.metadata.get("page", 0)
+                chunk.metadata = {
+                    "doc_id": doc_id,
+                    "display_name": doc_identity.display_name,
+                    "storage_name": doc_identity.storage_name,
+                    "source": doc_identity.source,
+                    "chunk_index": idx,
+                    "total_chunks": len(doc_chunks),
+                    "page": page,
+                }
+                doc_ids_for_file.append(chunk_id)
+                all_chunks.append(chunk)
+                all_chunk_ids.append(chunk_id)
+
+            doc_chunks_map[doc_id] = doc_ids_for_file
+            processed_docs_count += 1
+
+        if not all_chunks:
+            self.stdout.write(self.style.WARNING("No extractable chunks found in any PDF files."))
             return
 
-        # 3. Initialize Embeddings and Save to Chroma
+        self.stdout.write(f"Successfully prepared {len(all_chunks)} chunks across {len(doc_chunks_map)} document(s).")
+
+        # Initialize Embeddings and Chroma
         try:
-            self.stdout.write("Initializing Google Generative AI embeddings...")
-            # Reverting back to user's original valid model
-            embeddings = GoogleGenerativeAIEmbeddings(model="models/gemini-embedding-2")
-
-            self.stdout.write(f"Saving chunked documents to Chroma DB at {chroma_db_dir}...")
-            
-            vector_db = Chroma(persist_directory=chroma_db_dir, embedding_function=embeddings)
-            
-            # UPGRADE 1: Maximize batch size for Gemini API (Max 100)
-            batch_size = 100 
-            
-            for i in range(0, len(chunks), batch_size):
-                batch = chunks[i:i+batch_size]
-                success = False
-                
-                # UPGRADE 2: Setup exponential backoff variables
-                max_retries = 6
-                base_delay = 2 # Start with a 2-second wait
-                retries = 0
-                
-                while not success and retries < max_retries:
-                    try:
-                        vector_db.add_documents(batch)
-                        success = True
-                        self.stdout.write(f"Embedded batch {i//batch_size + 1}/{(len(chunks) + batch_size - 1)//batch_size}")
-                    
-                    except Exception as e:
-                        if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                            # Calculate delay: 2s, 4s, 8s, 16s, 32s... plus slight random jitter
-                            delay = base_delay * (2 ** retries) + random.uniform(0, 1)
-                            self.stdout.write(self.style.WARNING(f"Rate limit hit! Sleeping {delay:.2f} seconds before retrying..."))
-                            time.sleep(delay)
-                            retries += 1
-                        else:
-                            # If it's a different error (like network failure or bad data), crash immediately
-                            raise e
-                            
-                if not success:
-                    self.stdout.write(self.style.ERROR(f"Failed to embed batch {i//batch_size + 1} after {max_retries} retries. Skipping."))
-
-            self.stdout.write(self.style.SUCCESS(f"Success! Embedded and saved {len(chunks)} chunks to the vector database."))
-
+            self.stdout.write(f"Initializing local BGE embeddings ({getattr(settings, 'LOCAL_EMBEDDING_MODEL_NAME', 'BAAI/bge-small-en-v1.5')})...")
+            embeddings = get_embeddings()
+            vector_db = Chroma(
+                collection_name=collection_name,
+                persist_directory=chroma_db_dir,
+                embedding_function=embeddings
+            )
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"Error during embedding or database insertion: {e}"))
+            self.stdout.write(self.style.ERROR(f"Error initializing vector database: {e}"))
+            raise CommandError(f"Database initialization failed: {e}")
+
+        # Batch ingestion with retry
+        batch_size = options.get('batch_size') or 100
+        total_batches = (len(all_chunks) + batch_size - 1) // batch_size
+        failed_batches = []
+        total_embedded = 0
+
+        self.stdout.write(f"Saving chunked documents to Chroma collection '{collection_name}' at {chroma_db_dir}...")
+
+        for i in range(0, len(all_chunks), batch_size):
+            batch_chunks = all_chunks[i:i + batch_size]
+            batch_ids = all_chunk_ids[i:i + batch_size]
+            batch_num = i // batch_size + 1
+            success = False
+
+            max_retries = 3
+            base_delay = 1
+            retries = 0
+            last_exception = None
+
+            while not success and retries < max_retries:
+                try:
+                    vector_db.add_documents(batch_chunks, ids=batch_ids)
+                    success = True
+                    total_embedded += len(batch_chunks)
+                    self.stdout.write(f"Embedded batch {batch_num}/{total_batches} ({len(batch_chunks)} chunks)")
+                except Exception as e:
+                    last_exception = e
+                    delay = base_delay * (2 ** retries)
+                    self.stdout.write(self.style.WARNING(f"Error embedding batch {batch_num} ({e}). Retrying in {delay}s..."))
+                    time.sleep(delay)
+                    retries += 1
+
+            if not success:
+                failed_batches.append({
+                    "batch_num": batch_num,
+                    "chunk_count": len(batch_chunks),
+                    "error": str(last_exception)
+                })
+                self.stdout.write(self.style.ERROR(f"Failed to embed batch {batch_num}/{total_batches} after {retries} attempts."))
+
+        # Prune obsolete chunk IDs for successfully processed documents
+        for doc_id, valid_chunk_ids in doc_chunks_map.items():
+            try:
+                existing = vector_db.get(where={"doc_id": doc_id})
+                existing_ids = set(existing.get('ids', []))
+                obsolete_ids = list(existing_ids - set(valid_chunk_ids))
+                if obsolete_ids:
+                    vector_db.delete(ids=obsolete_ids)
+            except Exception as prune_err:
+                logger.warning("Error pruning obsolete chunk IDs for %s: %s", doc_id, prune_err)
+
+        if failed_batches:
+            self.stdout.write(self.style.ERROR(
+                f"Document ingestion completed with failures: {len(failed_batches)} batch(es) failed out of {total_batches}."
+            ))
+            raise CommandError(f"Document ingestion failed: {len(failed_batches)} batch(es) could not be embedded.")
+
+        self.stdout.write(self.style.SUCCESS(
+            f"Success! Embedded and saved {total_embedded} chunks across {processed_docs_count} document(s) "
+            f"into collection '{collection_name}'."
+        ))

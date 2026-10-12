@@ -12,24 +12,43 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 from pathlib import Path
 import os
+import warnings
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# SECURITY: Don't run with debug turned on in production! Default to False
+DEBUG = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 't', 'yes')
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
-
-# SECURITY WARNING: keep the secret key used in production secret!
+# SECURITY: Require a valid SECRET_KEY in production
 SECRET_KEY = os.environ.get('SECRET_KEY')
+if not DEBUG:
+    if not SECRET_KEY or SECRET_KEY == 'Your_Secret_Key' or len(SECRET_KEY) < 32:
+        raise ImproperlyConfigured(
+            "Production deployment requires a valid, secure SECRET_KEY (minimum 32 characters) "
+            "set via the SECRET_KEY environment variable."
+        )
+else:
+    if not SECRET_KEY:
+        SECRET_KEY = 'django-insecure-nexus-dev-fallback-key-do-not-use-in-production'
+        warnings.warn("No SECRET_KEY set; using fallback key for development under DEBUG=True.")
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# Allowed Hosts configured via environment variable
+allowed_hosts_raw = os.environ.get('ALLOWED_HOSTS', '127.0.0.1,localhost')
+ALLOWED_HOSTS = [h.strip() for h in allowed_hosts_raw.split(',') if h.strip()]
 
-ALLOWED_HOSTS = []
+# Maximum upload size (default: 50MB)
+MAX_UPLOAD_SIZE_BYTES = int(os.environ.get('MAX_UPLOAD_SIZE_BYTES', 50 * 1024 * 1024))
+DATA_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_SIZE_BYTES
+FILE_UPLOAD_MAX_MEMORY_SIZE = MAX_UPLOAD_SIZE_BYTES
+
+# Document storage directory
+DOCS_STORAGE_DIR = (BASE_DIR / 'data' / 'raw_docs').resolve()
+DOCS_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # Application definition
@@ -130,9 +149,82 @@ STATIC_URL = 'static/'
 
 MAILERS = {
     'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+        'BACKEND': os.environ.get(
+            'EMAIL_BACKEND',
+            'django.core.mail.backends.console.EmailBackend' if DEBUG else 'django.core.mail.backends.smtp.EmailBackend'
+        ),
     },
 }
 
-# Allow all origins for development (Frontend CORS fix)
-CORS_ALLOW_ALL_ORIGINS = True
+# Production Security Headers & Cookies
+SESSION_COOKIE_SECURE = os.environ.get('SESSION_COOKIE_SECURE', 'False' if DEBUG else 'True').lower() in ('true', '1', 't', 'yes')
+CSRF_COOKIE_SECURE = os.environ.get('CSRF_COOKIE_SECURE', 'False' if DEBUG else 'True').lower() in ('true', '1', 't', 'yes')
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = False  # Allows frontend JS to read CSRF cookie when needed
+SECURE_CONTENT_TYPE_NOSNIFF = True
+X_FRAME_OPTIONS = 'DENY'
+
+# CORS Configuration: restrict to explicitly configured origins
+CORS_ALLOW_ALL_ORIGINS = False
+cors_origins_raw = os.environ.get('CORS_ALLOWED_ORIGINS', 'http://127.0.0.1:8000,http://localhost:8000')
+CORS_ALLOWED_ORIGINS = [orig.strip() for orig in cors_origins_raw.split(',') if orig.strip()]
+
+# Configurable Authentication & Rate Limiting
+# Set API_REQUIRE_AUTH=True in .env to enforce authentication.
+# If False, the application allows public access protected by rate limiting.
+API_REQUIRE_AUTH = os.environ.get('API_REQUIRE_AUTH', 'False').lower() in ('true', '1', 't', 'yes')
+API_SECRET_KEY = os.environ.get('API_SECRET_KEY', None)
+
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+        'rest_framework.throttling.ScopedRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': os.environ.get('RATELIMIT_ANON', '60/minute'),
+        'user': os.environ.get('RATELIMIT_USER', '120/minute'),
+        'upload': os.environ.get('RATELIMIT_UPLOAD', '20/minute'),
+        'query': os.environ.get('RATELIMIT_QUERY', '30/minute'),
+    },
+}
+
+# Server-side Logging (technical details logged server-side, never leaked to client)
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'standard': {
+            'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s'
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'standard',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': os.environ.get('DJANGO_LOG_LEVEL', 'INFO'),
+    },
+    'loggers': {
+        'agent_api': {
+            'handlers': ['console'],
+            'level': 'DEBUG' if DEBUG else 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
+# RAG & Local Embedding Configuration
+CHROMA_PATH = os.environ.get('CHROMA_PATH', str((BASE_DIR / 'data' / 'chroma_db').resolve()))
+CHROMA_COLLECTION_NAME = os.environ.get('CHROMA_COLLECTION_NAME', 'pdf_documents_bge_small_v1')
+LOCAL_EMBEDDING_MODEL_NAME = os.environ.get('LOCAL_EMBEDDING_MODEL_NAME', 'BAAI/bge-small-en-v1.5')
+GEMINI_MODEL_NAME = os.environ.get('GEMINI_MODEL_NAME', 'gemini-3.5-flash')
+RAG_CHUNK_SIZE = int(os.environ.get('RAG_CHUNK_SIZE', '1000'))
+RAG_CHUNK_OVERLAP = int(os.environ.get('RAG_CHUNK_OVERLAP', '150'))
+BGE_QUERY_INSTRUCTION = os.environ.get('BGE_QUERY_INSTRUCTION', 'Represent this sentence for searching relevant passages: ')
