@@ -398,6 +398,47 @@ def generate_document_answer(query: str, doc_chunks: list, chat_history: list = 
         raise
 
 
+def evaluate_web_sufficiency(query: str, web_results: list) -> bool:
+    """
+    Evaluates whether the retrieved web search results contain relevant, sufficient factual evidence
+    to adequately answer the user's question without hallucination.
+    """
+    if not web_results:
+        return False
+
+    snippets = []
+    for i, r in enumerate(web_results[:5], 1):
+        title = r.get("title", "").strip()
+        snippet = r.get("snippet", "").strip()
+        if snippet or title:
+            snippets.append(f"Result {i} ({title}):\n{snippet[:400]}")
+
+    if not snippets:
+        return False
+
+    combined = "\n\n".join(snippets)
+    eval_prompt = (
+        "You are a strict factual evaluator assessing if the following web search results contain "
+        "direct, relevant, and sufficient factual evidence to answer the user's question without inventing information.\n\n"
+        f"User Question: {query}\n\n"
+        f"Web Search Results:\n{combined}\n\n"
+        "Do these web search results contain direct and sufficient factual evidence to answer the question?\n"
+        "Respond with ONLY 'YES' or 'NO'."
+    )
+
+    try:
+        current_llm = get_llm()
+        resp = current_llm.invoke(eval_prompt)
+        text = (getattr(resp, 'content', '') or str(resp)).strip().upper()
+        if "YES" in text and "NO" not in text[:text.find("YES")]:
+            return True
+        return False
+    except Exception as e:
+        _check_ollama_exception(e)
+        logger.warning("Error evaluating web sufficiency: %s", e)
+        return False
+
+
 def generate_web_answer(query: str, web_results: list) -> str:
     """Generates an answer based on web search evidence."""
     excerpts = []
@@ -532,37 +573,40 @@ def query_rag(query_text: str, history: list = None, allow_web_fallback: bool = 
 
     if web_res.get("success") and web_res.get("results"):
         web_results = web_res["results"]
-        answer = generate_web_answer(query_text, web_results)
-        web_citations = [
-            {
-                "title": r.get("title", "Web Source"),
-                "url": r.get("url", ""),
-                "snippet": r.get("snippet", "")
-            }
-            for r in web_results
-        ]
-        sources = [
-            {
-                "page_content": r.get("snippet", ""),
-                "metadata": {
-                    "source": r.get("url", ""),
-                    "title": r.get("title", ""),
+        # Explicit relevance and sufficiency check: do not treat non-empty web search results as sufficient automatically
+        is_web_sufficient = evaluate_web_sufficiency(query_text, web_results)
+        if is_web_sufficient:
+            answer = generate_web_answer(query_text, web_results)
+            web_citations = [
+                {
+                    "title": r.get("title", "Web Source"),
                     "url": r.get("url", ""),
-                    "source_type": "web"
+                    "snippet": r.get("snippet", "")
                 }
-            }
-            for r in web_results
-        ]
+                for r in web_results
+            ]
+            sources = [
+                {
+                    "page_content": r.get("snippet", ""),
+                    "metadata": {
+                        "source": r.get("url", ""),
+                        "title": r.get("title", ""),
+                        "url": r.get("url", ""),
+                        "source_type": "web"
+                    }
+                }
+                for r in web_results
+            ]
 
-        return {
-            "answer": answer,
-            "sources": sources,
-            "citations": {
-                "documents": [],
-                "web": web_citations
-            },
-            "evidence_source": "web"
-        }
+            return {
+                "answer": answer,
+                "sources": sources,
+                "citations": {
+                    "documents": [],
+                    "web": web_citations
+                },
+                "evidence_source": "web"
+            }
 
     # Step 5: Both document and web evidence are inadequate or unverified
     unverified_msg = (

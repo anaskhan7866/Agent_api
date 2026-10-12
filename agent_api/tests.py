@@ -1074,6 +1074,7 @@ class ContextSufficiencyAndResilienceTestCase(TestCase):
         with patch('agent_api.rag_service.retriever', mock_retriever), \
              patch('agent_api.rag_service.evaluate_context_sufficiency', return_value=False), \
              patch('agent_api.rag_service.perform_web_search', return_value={"success": True, "results": mock_web_results}) as mock_web_search, \
+             patch('agent_api.rag_service.evaluate_web_sufficiency', return_value=True), \
              patch('agent_api.rag_service.generate_web_answer', return_value="Alpha Corp acquired Beta Inc for $1.2B."):
 
             res = query_rag("Did Alpha Corp acquire Beta Inc?")
@@ -1090,6 +1091,75 @@ class ContextSufficiencyAndResilienceTestCase(TestCase):
             self.assertEqual(len(res["citations"]["documents"]), 0)
             self.assertEqual(len(res["sources"]), 1)
             self.assertEqual(res["sources"][0]["metadata"]["source_type"], "web")
+
+    def test_irrelevant_web_results_does_not_invent_answer(self):
+        """When web search returns results but they are irrelevant/insufficient, return unverified response without hallucination."""
+        from agent_api.rag_service import query_rag
+        from unittest.mock import MagicMock
+
+        mock_retriever = MagicMock()
+        mock_retriever.invoke.return_value = []
+        irrelevant_web_results = [
+            {
+                "title": "Random Recipe for Chocolate Cake",
+                "url": "https://recipes.example.com/cake",
+                "snippet": "Here is how to bake a delicious chocolate cake with cocoa powder."
+            }
+        ]
+
+        with patch('agent_api.rag_service.retriever', mock_retriever), \
+             patch('agent_api.rag_service.evaluate_context_sufficiency', return_value=False), \
+             patch('agent_api.rag_service.perform_web_search', return_value={"success": True, "results": irrelevant_web_results}), \
+             patch('agent_api.rag_service.evaluate_web_sufficiency', return_value=False), \
+             patch('agent_api.rag_service.generate_web_answer') as mock_web_gen:
+
+            res = query_rag("What is the Q3 corporate compliance revenue?")
+
+            # Must NEVER generate web answer or invent answers when results are irrelevant
+            mock_web_gen.assert_not_called()
+
+            # Must return unverified response
+            self.assertEqual(res["evidence_source"], "none")
+            self.assertIn("cannot be verified", res["answer"].lower())
+            self.assertEqual(res["citations"]["web"], [])
+            self.assertEqual(res["citations"]["documents"], [])
+            self.assertEqual(res["sources"], [])
+
+    def test_evaluate_web_sufficiency_evaluator_logic(self):
+        """Verify evaluate_web_sufficiency returns True on affirmation and False on rejection/empty."""
+        from agent_api.rag_service import evaluate_web_sufficiency
+        from unittest.mock import MagicMock
+
+        # Empty results return False
+        self.assertFalse(evaluate_web_sufficiency("query", []))
+
+        mock_llm_yes = MagicMock()
+        mock_llm_yes.invoke.return_value = MagicMock(content="YES, direct evidence is present.")
+        with patch('agent_api.rag_service.get_llm', return_value=mock_llm_yes):
+            self.assertTrue(evaluate_web_sufficiency("query", [{"title": "Title", "snippet": "Snippet"}]))
+
+        mock_llm_no = MagicMock()
+        mock_llm_no.invoke.return_value = MagicMock(content="NO, irrelevant to question.")
+        with patch('agent_api.rag_service.get_llm', return_value=mock_llm_no):
+            self.assertFalse(evaluate_web_sufficiency("query", [{"title": "Title", "snippet": "Snippet"}]))
+
+    def test_local_ollama_failure_during_web_answer_generation(self):
+        """Verify that an Ollama outage occurring during web answer generation raises typed error."""
+        from agent_api.rag_service import query_rag, OllamaServiceUnavailableError
+        from unittest.mock import MagicMock
+
+        mock_retriever = MagicMock()
+        mock_retriever.invoke.return_value = []
+        web_results = [{"title": "News", "url": "https://example.com", "snippet": "Relevant news."}]
+
+        with patch('agent_api.rag_service.retriever', mock_retriever), \
+             patch('agent_api.rag_service.evaluate_context_sufficiency', return_value=False), \
+             patch('agent_api.rag_service.perform_web_search', return_value={"success": True, "results": web_results}), \
+             patch('agent_api.rag_service.evaluate_web_sufficiency', return_value=True), \
+             patch('agent_api.rag_service.generate_web_answer', side_effect=OllamaServiceUnavailableError("Ollama connection failed")):
+
+            with self.assertRaises(OllamaServiceUnavailableError):
+                query_rag("Some live query")
 
     def test_insufficient_pdf_and_inadequate_web_states_cannot_verify(self):
         """When PDF context is insufficient and web search returns no evidence, state cannot be verified."""

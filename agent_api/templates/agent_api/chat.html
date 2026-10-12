@@ -964,7 +964,23 @@
                     
                     const metaLabel = document.createElement('span');
                     if (isWeb && source.metadata && source.metadata.url) {
-                        metaLabel.innerHTML = `<strong>[Web]</strong> <a href="${DOMPurify.sanitize(source.metadata.url)}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">${DOMPurify.sanitize(rawFilename)}</a>`;
+                        const rawUrl = String(source.metadata.url).trim();
+                        const prefix = document.createElement('strong');
+                        prefix.textContent = '[Web] ';
+                        metaLabel.appendChild(prefix);
+                        if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+                            const linkEl = document.createElement('a');
+                            linkEl.href = rawUrl;
+                            linkEl.target = '_blank';
+                            linkEl.rel = 'noopener noreferrer';
+                            linkEl.style.color = 'inherit';
+                            linkEl.style.textDecoration = 'underline';
+                            linkEl.textContent = rawFilename;
+                            metaLabel.appendChild(linkEl);
+                        } else {
+                            const textNode = document.createTextNode(rawFilename);
+                            metaLabel.appendChild(textNode);
+                        }
                     } else {
                         metaLabel.textContent = `[PDF] ${rawFilename}${pageText}`;
                     }
