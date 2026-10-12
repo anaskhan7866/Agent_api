@@ -164,22 +164,32 @@ class Command(BaseCommand):
                 })
                 self.stdout.write(self.style.ERROR(f"Failed to embed batch {batch_num}/{total_batches} after {retries} attempts."))
 
-        # Prune obsolete chunk IDs for successfully processed documents
-        for doc_id, valid_chunk_ids in doc_chunks_map.items():
-            try:
-                existing = vector_db.get(where={"doc_id": doc_id})
-                existing_ids = set(existing.get('ids', []))
-                obsolete_ids = list(existing_ids - set(valid_chunk_ids))
-                if obsolete_ids:
-                    vector_db.delete(ids=obsolete_ids)
-            except Exception as prune_err:
-                logger.warning("Error pruning obsolete chunk IDs for %s: %s", doc_id, prune_err)
-
+        # If any batch failed, NEVER prune obsolete chunks - preserve existing database state
         if failed_batches:
             self.stdout.write(self.style.ERROR(
-                f"Document ingestion completed with failures: {len(failed_batches)} batch(es) failed out of {total_batches}."
+                f"Document ingestion completed with failures: {len(failed_batches)} batch(es) failed out of {total_batches}. "
+                f"Preserving existing chunks in vector database without pruning."
             ))
+            logger.error("Bulk ingestion failed for %d batch(es); aborting obsolete chunk pruning.", len(failed_batches))
             raise CommandError(f"Document ingestion failed: {len(failed_batches)} batch(es) could not be embedded.")
+
+        # Prune obsolete chunk IDs ONLY after all batches succeeded and indexing is verified
+        for doc_id, valid_chunk_ids in doc_chunks_map.items():
+            try:
+                # Verify that all target chunk IDs were successfully indexed before pruning
+                verification = vector_db.get(ids=valid_chunk_ids)
+                indexed_ids = set(verification.get('ids', []))
+                if set(valid_chunk_ids).issubset(indexed_ids):
+                    existing = vector_db.get(where={"doc_id": doc_id})
+                    existing_ids = set(existing.get('ids', []))
+                    obsolete_ids = list(existing_ids - set(valid_chunk_ids))
+                    if obsolete_ids:
+                        vector_db.delete(ids=obsolete_ids)
+                        logger.info("Pruned %d obsolete chunks for doc_id=%s", len(obsolete_ids), doc_id)
+                else:
+                    logger.warning("Verification failed for doc_id=%s; new chunks missing from vector DB. Skipping pruning.", doc_id)
+            except Exception as prune_err:
+                logger.warning("Error pruning obsolete chunk IDs for %s: %s", doc_id, prune_err)
 
         self.stdout.write(self.style.SUCCESS(
             f"Success! Embedded and saved {total_embedded} chunks across {processed_docs_count} document(s) "

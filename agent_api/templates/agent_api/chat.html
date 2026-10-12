@@ -943,8 +943,11 @@
 
                 sources.forEach((source) => {
                     const rawSnippet = (source.page_content || '').substring(0, 200).trim() + '...';
-                    const rawFilename = source.metadata && source.metadata.source ? source.metadata.source.split(/[/\\]/).pop() : 'Document';
-                    const pageText = source.metadata && source.metadata.page !== undefined ? ` • Page ${source.metadata.page}` : '';
+                    const isWeb = source.metadata && (source.metadata.source_type === 'web' || source.metadata.type === 'web');
+                    const rawFilename = isWeb
+                        ? (source.metadata.title || 'Web Result')
+                        : (source.metadata && source.metadata.display_name ? source.metadata.display_name : (source.metadata && source.metadata.source ? source.metadata.source.split(/[/\\]/).pop() : 'Document'));
+                    const pageText = !isWeb && source.metadata && source.metadata.page !== undefined ? ` • Page ${source.metadata.page}` : '';
 
                     const item = document.createElement('div');
                     item.className = 'source-item';
@@ -953,10 +956,18 @@
                     meta.className = 'source-meta';
                     
                     const docIcon = document.createElement('span');
-                    docIcon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
+                    if (isWeb) {
+                        docIcon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
+                    } else {
+                        docIcon.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>';
+                    }
                     
                     const metaLabel = document.createElement('span');
-                    metaLabel.textContent = `${rawFilename}${pageText}`; // Safe text assignment
+                    if (isWeb && source.metadata && source.metadata.url) {
+                        metaLabel.innerHTML = `<strong>[Web]</strong> <a href="${DOMPurify.sanitize(source.metadata.url)}" target="_blank" rel="noopener noreferrer" style="color: inherit; text-decoration: underline;">${DOMPurify.sanitize(rawFilename)}</a>`;
+                    } else {
+                        metaLabel.textContent = `[PDF] ${rawFilename}${pageText}`;
+                    }
 
                     meta.appendChild(docIcon);
                     meta.appendChild(metaLabel);
@@ -964,7 +975,7 @@
                     const snippetDiv = document.createElement('div');
                     snippetDiv.style.opacity = '0.8';
                     snippetDiv.style.lineHeight = '1.5';
-                    snippetDiv.textContent = `"${rawSnippet}"`; // Safe text assignment
+                    snippetDiv.textContent = `"${rawSnippet}"`;
 
                     item.appendChild(meta);
                     item.appendChild(snippetDiv);

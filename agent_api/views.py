@@ -15,7 +15,14 @@ from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
-from .rag_service import compute_doc_id, ingest_single_pdf, query_rag, remove_pdf
+from .rag_service import (
+    compute_doc_id,
+    ingest_single_pdf,
+    query_rag,
+    remove_pdf,
+    OllamaServiceUnavailableError,
+    OllamaModelNotFoundError,
+)
 
 logger = logging.getLogger('agent_api')
 
@@ -188,6 +195,18 @@ class QueryRAGView(APIView):
         try:
             result = query_rag(query, sanitized_history)
             return Response(result, status=status.HTTP_200_OK)
+        except OllamaServiceUnavailableError as e:
+            logger.error("Ollama service unavailable: %s", e)
+            return Response(
+                {"error": str(e), "service": "ollama", "status": "unavailable"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
+        except OllamaModelNotFoundError as e:
+            logger.error("Ollama model not found: %s", e)
+            return Response(
+                {"error": str(e), "service": "ollama", "status": "model_not_found"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
         except Exception:
             logger.exception("Unexpected error in QueryRAGView:")
             return Response(

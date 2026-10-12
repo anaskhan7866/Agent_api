@@ -4,6 +4,8 @@ django-cors-headers
 langchain
 langchain-community
 langchain-chroma
+langchain-text-splitters
+langchain-classic
 chromadb
 langchain-ollama
 ollama

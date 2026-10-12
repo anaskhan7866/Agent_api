@@ -1002,3 +1002,269 @@ class OllamaIntegrationTestCase(TestCase):
         resp = llm.invoke("Respond with the single word: PONG")
         self.assertIsInstance(resp.content, str)
         self.assertGreater(len(resp.content), 0)
+
+
+class ContextSufficiencyAndResilienceTestCase(TestCase):
+    """
+    Comprehensive test suite verifying:
+    - Context-sufficiency workflow (PDF vs Web vs Unverified)
+    - Structured citations distinguishing document evidence from web evidence
+    - Bulk ingestion chunk preservation on failed batch
+    - Verified indexing before obsolete chunk pruning
+    - Unavailable service handling (Ollama outages, missing models, missing Serper key, web errors)
+    - Zero fallback to cloud LLMs
+    """
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+
+    def test_sufficient_context_avoids_unnecessary_web_search(self):
+        """When PDF context is evaluated as sufficient, answer is generated from docs and web search is NOT called."""
+        from agent_api.rag_service import query_rag
+        from langchain_core.documents import Document
+        from unittest.mock import MagicMock
+
+        mock_docs = [
+            Document(
+                page_content="The enterprise annual SLA uptime is guaranteed at 99.95%.",
+                metadata={"source": "data/raw_docs/service_sla.pdf", "display_name": "service_sla.pdf", "page": 2}
+            )
+        ]
+        mock_retriever = MagicMock()
+        mock_retriever.invoke.return_value = mock_docs
+
+        with patch('agent_api.rag_service.retriever', mock_retriever), \
+             patch('agent_api.rag_service.evaluate_context_sufficiency', return_value=True), \
+             patch('agent_api.rag_service.generate_document_answer', return_value="The SLA uptime guarantee is 99.95%."), \
+             patch('agent_api.rag_service.perform_web_search') as mock_web_search:
+
+            res = query_rag("What is the SLA uptime?")
+
+            # Web search must NEVER be called when PDF context is sufficient
+            mock_web_search.assert_not_called()
+
+            # Assert structured result
+            self.assertEqual(res["answer"], "The SLA uptime guarantee is 99.95%.")
+            self.assertEqual(res["evidence_source"], "document")
+            self.assertEqual(len(res["citations"]["documents"]), 1)
+            self.assertEqual(res["citations"]["documents"][0]["filename"], "service_sla.pdf")
+            self.assertEqual(res["citations"]["documents"][0]["page"], 2)
+            self.assertEqual(len(res["citations"]["web"]), 0)
+            self.assertEqual(len(res["sources"]), 1)
+
+    def test_insufficient_context_triggers_web_search(self):
+        """When PDF context is insufficient, web search is triggered and answer cites web sources."""
+        from agent_api.rag_service import query_rag
+        from langchain_core.documents import Document
+        from unittest.mock import MagicMock
+
+        mock_docs = [
+            Document(page_content="Unrelated internal notes.", metadata={"source": "data/raw_docs/notes.pdf", "page": 1})
+        ]
+        mock_web_results = [
+            {
+                "title": "Alpha Corp Acquires Beta Inc for $1.2B",
+                "url": "https://news.example.com/alpha-beta-deal",
+                "snippet": "Alpha Corp finalized its acquisition of Beta Inc for $1.2 billion in cash on Monday."
+            }
+        ]
+        mock_retriever = MagicMock()
+        mock_retriever.invoke.return_value = mock_docs
+
+        with patch('agent_api.rag_service.retriever', mock_retriever), \
+             patch('agent_api.rag_service.evaluate_context_sufficiency', return_value=False), \
+             patch('agent_api.rag_service.perform_web_search', return_value={"success": True, "results": mock_web_results}) as mock_web_search, \
+             patch('agent_api.rag_service.generate_web_answer', return_value="Alpha Corp acquired Beta Inc for $1.2B."):
+
+            res = query_rag("Did Alpha Corp acquire Beta Inc?")
+
+            # Web search must be triggered
+            mock_web_search.assert_called_once()
+
+            # Assert structured web citations
+            self.assertEqual(res["answer"], "Alpha Corp acquired Beta Inc for $1.2B.")
+            self.assertEqual(res["evidence_source"], "web")
+            self.assertEqual(len(res["citations"]["web"]), 1)
+            self.assertEqual(res["citations"]["web"][0]["title"], "Alpha Corp Acquires Beta Inc for $1.2B")
+            self.assertEqual(res["citations"]["web"][0]["url"], "https://news.example.com/alpha-beta-deal")
+            self.assertEqual(len(res["citations"]["documents"]), 0)
+            self.assertEqual(len(res["sources"]), 1)
+            self.assertEqual(res["sources"][0]["metadata"]["source_type"], "web")
+
+    def test_insufficient_pdf_and_inadequate_web_states_cannot_verify(self):
+        """When PDF context is insufficient and web search returns no evidence, state cannot be verified."""
+        from agent_api.rag_service import query_rag
+        from unittest.mock import MagicMock
+
+        mock_retriever = MagicMock()
+        mock_retriever.invoke.return_value = []
+
+        with patch('agent_api.rag_service.retriever', mock_retriever), \
+             patch('agent_api.rag_service.evaluate_context_sufficiency', return_value=False), \
+             patch('agent_api.rag_service.perform_web_search', return_value={"success": True, "results": []}):
+
+            res = query_rag("What is the top secret formula XYZ-99?")
+
+            self.assertEqual(res["evidence_source"], "none")
+            self.assertIn("cannot be verified", res["answer"].lower())
+            self.assertEqual(res["citations"]["documents"], [])
+            self.assertEqual(res["citations"]["web"], [])
+            self.assertEqual(res["sources"], [])
+
+    def test_structured_citation_correctness(self):
+        """Verify structured citations strictly conform to required fields and types."""
+        from agent_api.rag_service import query_rag
+        from langchain_core.documents import Document
+        from unittest.mock import MagicMock
+
+        mock_docs = [
+            Document(page_content="Policy doc content.", metadata={"display_name": "policy.pdf", "page": 7})
+        ]
+        mock_retriever = MagicMock()
+        mock_retriever.invoke.return_value = mock_docs
+
+        with patch('agent_api.rag_service.retriever', mock_retriever), \
+             patch('agent_api.rag_service.evaluate_context_sufficiency', return_value=True), \
+             patch('agent_api.rag_service.generate_document_answer', return_value="Document answer."):
+
+            res = query_rag("What is the policy?")
+            self.assertIn("citations", res)
+            self.assertIn("documents", res["citations"])
+            self.assertIn("web", res["citations"])
+            doc_cit = res["citations"]["documents"][0]
+            self.assertIn("filename", doc_cit)
+            self.assertIn("page", doc_cit)
+            self.assertEqual(doc_cit["filename"], "policy.pdf")
+            self.assertEqual(doc_cit["page"], 7)
+
+    def test_failed_ingestion_batch_preserves_existing_chunks(self):
+        """Ensure obsolete chunks are NEVER pruned after a failed batch in bulk ingestion."""
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        import tempfile
+        from pypdf import PdfWriter
+        from unittest.mock import MagicMock
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            pdf_file = temp_path / "batch_fail_test.pdf"
+            writer = PdfWriter()
+            writer.add_blank_page(width=72, height=72)
+            with open(pdf_file, 'wb') as f:
+                writer.write(f)
+
+            mock_vector_db = MagicMock()
+            # Simulate batch failure on add_documents
+            mock_vector_db.add_documents.side_effect = RuntimeError("Simulated embedding failure")
+            mock_vector_db.get.return_value = {"ids": ["chunk_existing_1", "chunk_existing_2"]}
+
+            with patch('agent_api.management.commands.ingest_docs.get_embeddings'), \
+                 patch('agent_api.management.commands.ingest_docs.Chroma', return_value=mock_vector_db), \
+                 patch('agent_api.management.commands.ingest_docs.PyPDFLoader.load', return_value=[
+                     MagicMock(page_content="Some test content", metadata={"page": 0})
+                 ]), \
+                 override_settings(DOCS_STORAGE_DIR=temp_path):
+
+                with self.assertRaises(CommandError):
+                    call_command('ingest_docs', batch_size=1)
+
+                # Obsolete chunk deletion must NEVER be called after a failed batch
+                mock_vector_db.delete.assert_not_called()
+
+    def test_successful_ingestion_verifies_indexing_before_pruning(self):
+        """Verify successful indexing is checked before deleting old chunks."""
+        from django.core.management import call_command
+        import tempfile
+        from pypdf import PdfWriter
+        from unittest.mock import MagicMock
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            pdf_file = temp_path / "verify_prune_test.pdf"
+            writer = PdfWriter()
+            writer.add_blank_page(width=72, height=72)
+            with open(pdf_file, 'wb') as f:
+                writer.write(f)
+
+            mock_vector_db = MagicMock()
+            mock_vector_db.add_documents.return_value = None
+
+            from agent_api.rag_service import compute_doc_id
+            target_doc_id = compute_doc_id("verify_prune_test.pdf")
+            new_chunk_id = f"{target_doc_id}_chunk_0"
+
+            def mock_get(*args, **kwargs):
+                if 'ids' in kwargs:
+                    return {"ids": [new_chunk_id]}
+                if 'where' in kwargs:
+                    return {"ids": [new_chunk_id, "obsolete_chunk_old"]}
+                return {"ids": []}
+
+            mock_vector_db.get.side_effect = mock_get
+
+            with patch('agent_api.management.commands.ingest_docs.get_embeddings'), \
+                 patch('agent_api.management.commands.ingest_docs.Chroma', return_value=mock_vector_db), \
+                 patch('agent_api.management.commands.ingest_docs.PyPDFLoader.load', return_value=[
+                     MagicMock(page_content="New chunk content", metadata={"page": 0})
+                 ]), \
+                 override_settings(DOCS_STORAGE_DIR=temp_path):
+
+                call_command('ingest_docs', batch_size=1)
+
+                # Delete should be called for obsolete_chunk_old because verification passed
+                mock_vector_db.delete.assert_called_with(ids=["obsolete_chunk_old"])
+
+    def test_unavailable_services_ollama_outage_handling(self):
+        """Verify Ollama service outage is handled gracefully with 503 and no cloud fallback."""
+        from agent_api.rag_service import OllamaServiceUnavailableError
+
+        with patch('agent_api.rag_service.evaluate_context_sufficiency', side_effect=OllamaServiceUnavailableError("Ollama is down")):
+            response = self.client.post(
+                reverse('query-rag'),
+                data=json.dumps({"query": "What is the policy?"}),
+                content_type='application/json'
+            )
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.json()["status"], "unavailable")
+
+    def test_unavailable_services_missing_ollama_model(self):
+        """Verify missing Ollama model is handled gracefully with 503 and no cloud fallback."""
+        from agent_api.rag_service import OllamaModelNotFoundError
+
+        with patch('agent_api.rag_service.evaluate_context_sufficiency', side_effect=OllamaModelNotFoundError("Model not found")):
+            response = self.client.post(
+                reverse('query-rag'),
+                data=json.dumps({"query": "What is the policy?"}),
+                content_type='application/json'
+            )
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.json()["status"], "model_not_found")
+
+    def test_unavailable_services_missing_serper_credentials(self):
+        """Verify missing SERPAPI_API_KEY does not crash and marks evidence as unverified."""
+        from agent_api.rag_service import perform_web_search, query_rag
+        from unittest.mock import MagicMock
+
+        with patch.dict(os.environ, {}, clear=True):
+            res = perform_web_search("latest market updates")
+            self.assertFalse(res["success"])
+            self.assertIn("missing", res["error"].lower())
+
+            mock_retriever = MagicMock()
+            mock_retriever.invoke.return_value = []
+
+            with patch('agent_api.rag_service.retriever', mock_retriever), \
+                 patch('agent_api.rag_service.evaluate_context_sufficiency', return_value=False):
+                rag_res = query_rag("latest market updates")
+                self.assertEqual(rag_res["evidence_source"], "none")
+                self.assertIn("cannot be verified", rag_res["answer"].lower())
+
+    def test_unavailable_services_web_search_network_error(self):
+        """Verify web search HTTP or network error is handled gracefully without crashing."""
+        from agent_api.rag_service import perform_web_search
+
+        with patch.dict(os.environ, {"SERPAPI_API_KEY": "dummy_key"}):
+            with patch('http.client.HTTPSConnection.request', side_effect=ConnectionResetError("Connection reset by peer")):
+                res = perform_web_search("some query")
+                self.assertFalse(res["success"])
+                self.assertIn("failed", res["error"].lower())
